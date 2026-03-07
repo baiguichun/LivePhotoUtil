@@ -1,6 +1,7 @@
 package com.xiaobai.livephotoutil.compat
 
 import java.io.File
+import kotlinx.coroutines.CancellationException
 
 /**
  * LivePhoto 协议探测引擎，按优先级依次执行适配器。
@@ -15,13 +16,19 @@ class LivePhotoCompatEngine(private val adapters: List<LivePhotoAdapter>) {
      * @return 探测成功返回资产，否则返回 `null`。
      */
     fun detect(candidates: List<File>): LivePhotoAsset? {
-        validateInput(candidates)
-        val input = ProbeInput(candidates)
-        for (adapter in adapters) {
-            val result = adapter.probe(input)
-            if (result != null) return result
+        try {
+            validateInput(candidates)
+            val input = ProbeInput(candidates)
+            for (adapter in adapters) {
+                val result = adapter.probe(input)
+                if (result != null) return result
+            }
+            return null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
         }
-        return null
     }
 
     /**
@@ -30,7 +37,12 @@ class LivePhotoCompatEngine(private val adapters: List<LivePhotoAdapter>) {
      * @param candidates 待探测候选文件。
      */
     fun detectOrThrow(candidates: List<File>): LivePhotoAsset {
-        return detect(candidates) ?: error("Cannot detect supported LivePhoto format from input files.")
+        val detected = detect(candidates)
+        if (detected != null) return detected
+        throw LivePhotoSdkException(
+            code = LivePhotoErrorCode.DETECTION_FAILED,
+            message = "Cannot detect supported LivePhoto format from input files."
+        )
     }
 
     /**

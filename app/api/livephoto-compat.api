@@ -1,0 +1,329 @@
+### com.xiaobai.livephotoutil.compat.AdaptersKt
+public final class com.xiaobai.livephotoutil.compat.AdaptersKt {
+}
+
+### com.xiaobai.livephotoutil.compat.ApplePairAdapter
+public final class com.xiaobai.livephotoutil.compat.ApplePairAdapter implements com.xiaobai.livephotoutil.compat.LivePhotoAdapter {
+  public com.xiaobai.livephotoutil.compat.ApplePairAdapter();
+  public java.lang.String getId();
+  public int getPriority();
+  public com.xiaobai.livephotoutil.compat.LivePhotoAsset probe(com.xiaobai.livephotoutil.compat.ProbeInput);
+}
+
+### com.xiaobai.livephotoutil.compat.CanonicalPackage
+public final class com.xiaobai.livephotoutil.compat.CanonicalPackage {
+  public com.xiaobai.livephotoutil.compat.CanonicalPackage(java.io.File, java.io.File, java.io.File, java.io.File, java.io.File);
+  public final java.io.File getDir();
+  public final java.io.File getImageFile();
+  public final java.io.File getVideoFile();
+  public final java.io.File getManifestFile();
+  public final java.io.File getRawDir();
+  public final java.io.File component1();
+  public final java.io.File component2();
+  public final java.io.File component3();
+  public final java.io.File component4();
+  public final java.io.File component5();
+  public final com.xiaobai.livephotoutil.compat.CanonicalPackage copy(java.io.File, java.io.File, java.io.File, java.io.File, java.io.File);
+  public static com.xiaobai.livephotoutil.compat.CanonicalPackage copy$default(com.xiaobai.livephotoutil.compat.CanonicalPackage, java.io.File, java.io.File, java.io.File, java.io.File, java.io.File, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.CloudCompatService
+public final class com.xiaobai.livephotoutil.compat.CloudCompatService {
+  public com.xiaobai.livephotoutil.compat.CloudCompatService(com.xiaobai.livephotoutil.compat.LivePhotoTranscoder);
+  public com.xiaobai.livephotoutil.compat.CloudCompatService(com.xiaobai.livephotoutil.compat.LivePhotoTranscoder, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final com.xiaobai.livephotoutil.compat.CanonicalPackage normalizeForCloud(com.xiaobai.livephotoutil.compat.LivePhotoAsset, java.io.File);
+  public final com.xiaobai.livephotoutil.compat.ConversionResult restoreForDevice(java.io.File, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File, boolean);
+  public static com.xiaobai.livephotoutil.compat.ConversionResult restoreForDevice$default(com.xiaobai.livephotoutil.compat.CloudCompatService, java.io.File, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File, boolean, int, java.lang.Object);
+  public final java.util.List<java.io.File> restoreOriginal(java.io.File, java.io.File);
+  public com.xiaobai.livephotoutil.compat.CloudCompatService();
+}
+
+### com.xiaobai.livephotoutil.compat.ContainerMode
+public final class com.xiaobai.livephotoutil.compat.ContainerMode extends java.lang.Enum<com.xiaobai.livephotoutil.compat.ContainerMode> {
+  public static final com.xiaobai.livephotoutil.compat.ContainerMode APPLE_PAIR;
+  public static final com.xiaobai.livephotoutil.compat.ContainerMode MOTION_PHOTO_JPEG;
+  public static final com.xiaobai.livephotoutil.compat.ContainerMode RAW_REPLAY;
+  public static com.xiaobai.livephotoutil.compat.ContainerMode[] values();
+  public static com.xiaobai.livephotoutil.compat.ContainerMode valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<com.xiaobai.livephotoutil.compat.ContainerMode> getEntries();
+}
+
+### com.xiaobai.livephotoutil.compat.ConversionResult
+public final class com.xiaobai.livephotoutil.compat.ConversionResult {
+  public com.xiaobai.livephotoutil.compat.ConversionResult(com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.ContainerMode, java.util.List<? extends java.io.File>);
+  public final com.xiaobai.livephotoutil.compat.DeviceVendor getTargetVendor();
+  public final com.xiaobai.livephotoutil.compat.ContainerMode getMode();
+  public final java.util.List<java.io.File> getOutputFiles();
+  public final com.xiaobai.livephotoutil.compat.DeviceVendor component1();
+  public final com.xiaobai.livephotoutil.compat.ContainerMode component2();
+  public final java.util.List<java.io.File> component3();
+  public final com.xiaobai.livephotoutil.compat.ConversionResult copy(com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.ContainerMode, java.util.List<? extends java.io.File>);
+  public static com.xiaobai.livephotoutil.compat.ConversionResult copy$default(com.xiaobai.livephotoutil.compat.ConversionResult, com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.ContainerMode, java.util.List, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.DeviceVendor
+public final class com.xiaobai.livephotoutil.compat.DeviceVendor extends java.lang.Enum<com.xiaobai.livephotoutil.compat.DeviceVendor> {
+  public static final com.xiaobai.livephotoutil.compat.DeviceVendor APPLE;
+  public static final com.xiaobai.livephotoutil.compat.DeviceVendor GOOGLE;
+  public static final com.xiaobai.livephotoutil.compat.DeviceVendor HUAWEI;
+  public static final com.xiaobai.livephotoutil.compat.DeviceVendor VIVO;
+  public static final com.xiaobai.livephotoutil.compat.DeviceVendor OPPO;
+  public static final com.xiaobai.livephotoutil.compat.DeviceVendor XIAOMI;
+  public static final com.xiaobai.livephotoutil.compat.DeviceVendor UNKNOWN;
+  public static com.xiaobai.livephotoutil.compat.DeviceVendor[] values();
+  public static com.xiaobai.livephotoutil.compat.DeviceVendor valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<com.xiaobai.livephotoutil.compat.DeviceVendor> getEntries();
+}
+
+### com.xiaobai.livephotoutil.compat.DirectoryLockRegistry
+public final class com.xiaobai.livephotoutil.compat.DirectoryLockRegistry {
+  public static final com.xiaobai.livephotoutil.compat.DirectoryLockRegistry INSTANCE;
+  public final <T> T withDirectoryLocks(java.util.List<? extends java.io.File>, kotlin.jvm.functions.Function0<? extends T>);
+}
+
+### com.xiaobai.livephotoutil.compat.GenericPairAdapter
+public final class com.xiaobai.livephotoutil.compat.GenericPairAdapter implements com.xiaobai.livephotoutil.compat.LivePhotoAdapter {
+  public com.xiaobai.livephotoutil.compat.GenericPairAdapter();
+  public java.lang.String getId();
+  public int getPriority();
+  public com.xiaobai.livephotoutil.compat.LivePhotoAsset probe(com.xiaobai.livephotoutil.compat.ProbeInput);
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoAdapter
+public interface com.xiaobai.livephotoutil.compat.LivePhotoAdapter {
+  public abstract java.lang.String getId();
+  public abstract int getPriority();
+  public abstract com.xiaobai.livephotoutil.compat.LivePhotoAsset probe(com.xiaobai.livephotoutil.compat.ProbeInput);
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoAsset
+public final class com.xiaobai.livephotoutil.compat.LivePhotoAsset {
+  public com.xiaobai.livephotoutil.compat.LivePhotoAsset(com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.LivePhotoProtocol, com.xiaobai.livephotoutil.compat.MediaSlice, com.xiaobai.livephotoutil.compat.MediaSlice, java.lang.String, java.util.List<java.lang.String>);
+  public com.xiaobai.livephotoutil.compat.LivePhotoAsset(com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.LivePhotoProtocol, com.xiaobai.livephotoutil.compat.MediaSlice, com.xiaobai.livephotoutil.compat.MediaSlice, java.lang.String, java.util.List, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final com.xiaobai.livephotoutil.compat.DeviceVendor getVendor();
+  public final com.xiaobai.livephotoutil.compat.LivePhotoProtocol getProtocol();
+  public final com.xiaobai.livephotoutil.compat.MediaSlice getImage();
+  public final com.xiaobai.livephotoutil.compat.MediaSlice getVideo();
+  public final java.lang.String getContentId();
+  public final java.util.List<java.lang.String> getNotes();
+  public final com.xiaobai.livephotoutil.compat.DeviceVendor component1();
+  public final com.xiaobai.livephotoutil.compat.LivePhotoProtocol component2();
+  public final com.xiaobai.livephotoutil.compat.MediaSlice component3();
+  public final com.xiaobai.livephotoutil.compat.MediaSlice component4();
+  public final java.lang.String component5();
+  public final java.util.List<java.lang.String> component6();
+  public final com.xiaobai.livephotoutil.compat.LivePhotoAsset copy(com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.LivePhotoProtocol, com.xiaobai.livephotoutil.compat.MediaSlice, com.xiaobai.livephotoutil.compat.MediaSlice, java.lang.String, java.util.List<java.lang.String>);
+  public static com.xiaobai.livephotoutil.compat.LivePhotoAsset copy$default(com.xiaobai.livephotoutil.compat.LivePhotoAsset, com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.LivePhotoProtocol, com.xiaobai.livephotoutil.compat.MediaSlice, com.xiaobai.livephotoutil.compat.MediaSlice, java.lang.String, java.util.List, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoCompatEngine
+public final class com.xiaobai.livephotoutil.compat.LivePhotoCompatEngine {
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoCompatEngine$Companion Companion;
+  public com.xiaobai.livephotoutil.compat.LivePhotoCompatEngine(java.util.List<? extends com.xiaobai.livephotoutil.compat.LivePhotoAdapter>);
+  public final com.xiaobai.livephotoutil.compat.LivePhotoAsset detect(java.util.List<? extends java.io.File>);
+  public final com.xiaobai.livephotoutil.compat.LivePhotoAsset detectOrThrow(java.util.List<? extends java.io.File>);
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoCoroutineSdk
+public final class com.xiaobai.livephotoutil.compat.LivePhotoCoroutineSdk {
+  public com.xiaobai.livephotoutil.compat.LivePhotoCoroutineSdk(com.xiaobai.livephotoutil.compat.LivePhotoCompatEngine, com.xiaobai.livephotoutil.compat.LivePhotoTranscoder, com.xiaobai.livephotoutil.compat.CloudCompatService, kotlinx.coroutines.CoroutineDispatcher);
+  public com.xiaobai.livephotoutil.compat.LivePhotoCoroutineSdk(com.xiaobai.livephotoutil.compat.LivePhotoCompatEngine, com.xiaobai.livephotoutil.compat.LivePhotoTranscoder, com.xiaobai.livephotoutil.compat.CloudCompatService, kotlinx.coroutines.CoroutineDispatcher, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.Object detect(java.util.List<? extends java.io.File>, kotlin.coroutines.Continuation<? super com.xiaobai.livephotoutil.compat.LivePhotoAsset>);
+  public final java.lang.Object detectOrThrow(java.util.List<? extends java.io.File>, kotlin.coroutines.Continuation<? super com.xiaobai.livephotoutil.compat.LivePhotoAsset>);
+  public final java.lang.Object transcode(com.xiaobai.livephotoutil.compat.LivePhotoAsset, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File, kotlin.coroutines.Continuation<? super com.xiaobai.livephotoutil.compat.ConversionResult>);
+  public final java.lang.Object detectAndTranscode(java.util.List<? extends java.io.File>, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File, kotlin.coroutines.Continuation<? super com.xiaobai.livephotoutil.compat.ConversionResult>);
+  public final java.lang.Object normalizeForCloud(com.xiaobai.livephotoutil.compat.LivePhotoAsset, java.io.File, kotlin.coroutines.Continuation<? super com.xiaobai.livephotoutil.compat.CanonicalPackage>);
+  public final java.lang.Object detectAndNormalizeForCloud(java.util.List<? extends java.io.File>, java.io.File, kotlin.coroutines.Continuation<? super com.xiaobai.livephotoutil.compat.CanonicalPackage>);
+  public final java.lang.Object restoreForDevice(java.io.File, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File, boolean, kotlin.coroutines.Continuation<? super com.xiaobai.livephotoutil.compat.ConversionResult>);
+  public static java.lang.Object restoreForDevice$default(com.xiaobai.livephotoutil.compat.LivePhotoCoroutineSdk, java.io.File, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File, boolean, kotlin.coroutines.Continuation, int, java.lang.Object);
+  public final java.lang.Object restoreOriginal(java.io.File, java.io.File, kotlin.coroutines.Continuation<? super java.util.List<? extends java.io.File>>);
+  public com.xiaobai.livephotoutil.compat.LivePhotoCoroutineSdk();
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoErrorCode
+public final class com.xiaobai.livephotoutil.compat.LivePhotoErrorCode extends java.lang.Enum<com.xiaobai.livephotoutil.compat.LivePhotoErrorCode> {
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode INVALID_INPUT;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode DETECTION_FAILED;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode UNSUPPORTED_VENDOR;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode UNSUPPORTED_TRANSCODE_TARGET;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode CANONICAL_MANIFEST_MISSING;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode CANONICAL_PAYLOAD_MISSING;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode INTEGRITY_CHECK_FAILED;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode RAW_REPLAY_UNAVAILABLE;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode OUTPUT_PATH_INVALID;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode FILE_IO_ERROR;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode INTERNAL_ERROR;
+  public static com.xiaobai.livephotoutil.compat.LivePhotoErrorCode[] values();
+  public static com.xiaobai.livephotoutil.compat.LivePhotoErrorCode valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<com.xiaobai.livephotoutil.compat.LivePhotoErrorCode> getEntries();
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoErrorMapper
+public final class com.xiaobai.livephotoutil.compat.LivePhotoErrorMapper {
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoErrorMapper INSTANCE;
+  public final com.xiaobai.livephotoutil.compat.LivePhotoSdkException map(java.lang.Throwable, com.xiaobai.livephotoutil.compat.LivePhotoErrorCode);
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoProtocol
+public final class com.xiaobai.livephotoutil.compat.LivePhotoProtocol extends java.lang.Enum<com.xiaobai.livephotoutil.compat.LivePhotoProtocol> {
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoProtocol APPLE_PAIR;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoProtocol MOTION_PHOTO;
+  public static final com.xiaobai.livephotoutil.compat.LivePhotoProtocol GENERIC_PAIR;
+  public static com.xiaobai.livephotoutil.compat.LivePhotoProtocol[] values();
+  public static com.xiaobai.livephotoutil.compat.LivePhotoProtocol valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<com.xiaobai.livephotoutil.compat.LivePhotoProtocol> getEntries();
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoSdkException
+public final class com.xiaobai.livephotoutil.compat.LivePhotoSdkException extends java.lang.IllegalArgumentException {
+  public com.xiaobai.livephotoutil.compat.LivePhotoSdkException(com.xiaobai.livephotoutil.compat.LivePhotoErrorCode, java.lang.String, java.lang.Throwable);
+  public com.xiaobai.livephotoutil.compat.LivePhotoSdkException(com.xiaobai.livephotoutil.compat.LivePhotoErrorCode, java.lang.String, java.lang.Throwable, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final com.xiaobai.livephotoutil.compat.LivePhotoErrorCode getCode();
+}
+
+### com.xiaobai.livephotoutil.compat.LivePhotoTranscoder
+public final class com.xiaobai.livephotoutil.compat.LivePhotoTranscoder {
+  public com.xiaobai.livephotoutil.compat.LivePhotoTranscoder();
+  public final com.xiaobai.livephotoutil.compat.ConversionResult transcode(com.xiaobai.livephotoutil.compat.LivePhotoAsset, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File);
+}
+
+### com.xiaobai.livephotoutil.compat.MediaIO
+public final class com.xiaobai.livephotoutil.compat.MediaIO {
+  public static final com.xiaobai.livephotoutil.compat.MediaIO INSTANCE;
+  public final java.lang.String detectMime(java.io.File);
+  public final boolean isImage(java.lang.String);
+  public final boolean isVideo(java.lang.String);
+  public final com.xiaobai.livephotoutil.compat.MediaSlice wholeFileSlice(java.io.File);
+  public final byte[] readSlice(com.xiaobai.livephotoutil.compat.MediaSlice);
+  public final void copySlice(com.xiaobai.livephotoutil.compat.MediaSlice, java.io.OutputStream);
+  public final void writeSlice(com.xiaobai.livephotoutil.compat.MediaSlice, java.io.File);
+  public final void writeToFileAtomic(java.io.File, kotlin.jvm.functions.Function1<? super java.io.OutputStream, kotlin.Unit>);
+  public final void writeBytesAtomic(java.io.File, byte[]);
+  public final void copySliceAsMp4Compatible(com.xiaobai.livephotoutil.compat.MediaSlice, java.io.OutputStream);
+  public final void copySliceAsQuickTimeCompatible(com.xiaobai.livephotoutil.compat.MediaSlice, java.io.OutputStream);
+  public final long findEmbeddedMp4Offset(java.io.File);
+  public final boolean hasIsoBmffFtypAt(java.io.File, long);
+  public final byte[] readPrefix(java.io.File, int);
+}
+
+### com.xiaobai.livephotoutil.compat.MediaSlice
+public final class com.xiaobai.livephotoutil.compat.MediaSlice {
+  public com.xiaobai.livephotoutil.compat.MediaSlice(java.io.File, long, long, java.lang.String);
+  public final java.io.File getSourceFile();
+  public final long getOffset();
+  public final long getLength();
+  public final java.lang.String getMimeType();
+  public final java.io.File component1();
+  public final long component2();
+  public final long component3();
+  public final java.lang.String component4();
+  public final com.xiaobai.livephotoutil.compat.MediaSlice copy(java.io.File, long, long, java.lang.String);
+  public static com.xiaobai.livephotoutil.compat.MediaSlice copy$default(com.xiaobai.livephotoutil.compat.MediaSlice, java.io.File, long, long, java.lang.String, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.MotionPhotoProbeMetadata
+final class com.xiaobai.livephotoutil.compat.MotionPhotoProbeMetadata {
+  public com.xiaobai.livephotoutil.compat.MotionPhotoProbeMetadata(java.lang.String, java.util.Set<java.lang.Long>);
+  public final java.lang.String getXmpPacket();
+  public final java.util.Set<java.lang.Long> getExpectedVideoOffsets();
+  public final java.lang.String component1();
+  public final java.util.Set<java.lang.Long> component2();
+  public final com.xiaobai.livephotoutil.compat.MotionPhotoProbeMetadata copy(java.lang.String, java.util.Set<java.lang.Long>);
+  public static com.xiaobai.livephotoutil.compat.MotionPhotoProbeMetadata copy$default(com.xiaobai.livephotoutil.compat.MotionPhotoProbeMetadata, java.lang.String, java.util.Set, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.NameHeuristics
+public final class com.xiaobai.livephotoutil.compat.NameHeuristics {
+  public static final com.xiaobai.livephotoutil.compat.NameHeuristics INSTANCE;
+  public final java.lang.String stem(java.io.File);
+  public final java.lang.String normalizedStem(java.io.File);
+  public final int pairScore(java.io.File, java.io.File);
+}
+
+### com.xiaobai.livephotoutil.compat.PairCandidate
+final class com.xiaobai.livephotoutil.compat.PairCandidate {
+  public com.xiaobai.livephotoutil.compat.PairCandidate(java.io.File, java.io.File, int);
+  public final java.io.File getImage();
+  public final java.io.File getVideo();
+  public final int getScore();
+  public final java.io.File component1();
+  public final java.io.File component2();
+  public final int component3();
+  public final com.xiaobai.livephotoutil.compat.PairCandidate copy(java.io.File, java.io.File, int);
+  public static com.xiaobai.livephotoutil.compat.PairCandidate copy$default(com.xiaobai.livephotoutil.compat.PairCandidate, java.io.File, java.io.File, int, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.PairSearchResult
+final class com.xiaobai.livephotoutil.compat.PairSearchResult {
+  public com.xiaobai.livephotoutil.compat.PairSearchResult(com.xiaobai.livephotoutil.compat.PairCandidate, java.lang.Integer);
+  public final com.xiaobai.livephotoutil.compat.PairCandidate getBest();
+  public final java.lang.Integer getSecondBestScore();
+  public final com.xiaobai.livephotoutil.compat.PairCandidate component1();
+  public final java.lang.Integer component2();
+  public final com.xiaobai.livephotoutil.compat.PairSearchResult copy(com.xiaobai.livephotoutil.compat.PairCandidate, java.lang.Integer);
+  public static com.xiaobai.livephotoutil.compat.PairSearchResult copy$default(com.xiaobai.livephotoutil.compat.PairSearchResult, com.xiaobai.livephotoutil.compat.PairCandidate, java.lang.Integer, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.ProbeInput
+public final class com.xiaobai.livephotoutil.compat.ProbeInput {
+  public com.xiaobai.livephotoutil.compat.ProbeInput(java.util.List<? extends java.io.File>);
+  public final java.util.List<java.io.File> getCandidates();
+  public final java.lang.String mimeOf(java.io.File);
+  public final byte[] prefixOf(java.io.File, int);
+}
+
+### com.xiaobai.livephotoutil.compat.VendorMotionPhotoAdapter
+public final class com.xiaobai.livephotoutil.compat.VendorMotionPhotoAdapter implements com.xiaobai.livephotoutil.compat.LivePhotoAdapter {
+  public com.xiaobai.livephotoutil.compat.VendorMotionPhotoAdapter(com.xiaobai.livephotoutil.compat.VendorProfile);
+  public java.lang.String getId();
+  public int getPriority();
+  public com.xiaobai.livephotoutil.compat.LivePhotoAsset probe(com.xiaobai.livephotoutil.compat.ProbeInput);
+}
+
+### com.xiaobai.livephotoutil.compat.VendorProfile
+public final class com.xiaobai.livephotoutil.compat.VendorProfile {
+  public com.xiaobai.livephotoutil.compat.VendorProfile(com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.ContainerMode, java.util.List<java.lang.String>, java.util.Map<java.lang.String, java.lang.String>, int);
+  public final com.xiaobai.livephotoutil.compat.DeviceVendor getVendor();
+  public final com.xiaobai.livephotoutil.compat.ContainerMode getMode();
+  public final java.util.List<java.lang.String> getDetectMarkers();
+  public final java.util.Map<java.lang.String, java.lang.String> getXmpAttributes();
+  public final int getPriority();
+  public final com.xiaobai.livephotoutil.compat.DeviceVendor component1();
+  public final com.xiaobai.livephotoutil.compat.ContainerMode component2();
+  public final java.util.List<java.lang.String> component3();
+  public final java.util.Map<java.lang.String, java.lang.String> component4();
+  public final int component5();
+  public final com.xiaobai.livephotoutil.compat.VendorProfile copy(com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.ContainerMode, java.util.List<java.lang.String>, java.util.Map<java.lang.String, java.lang.String>, int);
+  public static com.xiaobai.livephotoutil.compat.VendorProfile copy$default(com.xiaobai.livephotoutil.compat.VendorProfile, com.xiaobai.livephotoutil.compat.DeviceVendor, com.xiaobai.livephotoutil.compat.ContainerMode, java.util.List, java.util.Map, int, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.VendorProfiles
+public final class com.xiaobai.livephotoutil.compat.VendorProfiles {
+  public static final com.xiaobai.livephotoutil.compat.VendorProfiles INSTANCE;
+  public final com.xiaobai.livephotoutil.compat.VendorProfile profileOf(com.xiaobai.livephotoutil.compat.DeviceVendor);
+  public final java.util.List<com.xiaobai.livephotoutil.compat.VendorProfile> androidMotionProfiles();
+}

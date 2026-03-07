@@ -12,6 +12,16 @@ import java.util.Locale
 object MediaIO {
     /** 文件 IO 默认缓冲区大小。 */
     private const val IO_BUFFER_SIZE = 8192
+    /** ISO BMFF `ftyp` box 最小合法长度。 */
+    private const val MIN_FTYP_BOX_SIZE = 16L
+    /** ISO BMFF `ftyp` box 类型标识。 */
+    private val FTYP_TYPE = byteArrayOf('f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte())
+    /** 标准 MP4 目标主品牌（major brand）。 */
+    private val BRAND_ISOM = byteArrayOf('i'.code.toByte(), 's'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte())
+    /** 常见 MP4 兼容品牌。 */
+    private val BRAND_MP42 = byteArrayOf('m'.code.toByte(), 'p'.code.toByte(), '4'.code.toByte(), '2'.code.toByte())
+    /** QuickTime 主品牌（major brand）。 */
+    private val BRAND_QT = byteArrayOf('q'.code.toByte(), 't'.code.toByte(), ' '.code.toByte(), ' '.code.toByte())
 
     /**
      * 基于文件头魔数与扩展名猜测 MIME 类型。
@@ -150,6 +160,42 @@ object MediaIO {
     }
 
     /**
+     * 以 MP4 兼容容器形式写出视频切片。
+     *
+     * 若输入为 ISO BMFF/QuickTime，则通过重写 `ftyp` 主品牌与兼容品牌输出 MP4 兼容流；
+     * 若输入不是 ISO BMFF，则抛出异常，避免输出伪 MotionPhoto。
+     *
+     * @param slice 输入视频切片。
+     * @param out 输出流。
+     */
+    fun copySliceAsMp4Compatible(slice: MediaSlice, out: OutputStream) {
+        copySliceWithTargetBrand(
+            slice = slice,
+            out = out,
+            targetMajorBrand = BRAND_ISOM,
+            requiredCompatibleBrands = listOf(BRAND_ISOM, BRAND_MP42)
+        )
+    }
+
+    /**
+     * 以 QuickTime 兼容容器形式写出视频切片。
+     *
+     * 若输入为 ISO BMFF，则重写 `ftyp` 主品牌为 QuickTime；
+     * 若输入不是 ISO BMFF，则抛出异常。
+     *
+     * @param slice 输入视频切片。
+     * @param out 输出流。
+     */
+    fun copySliceAsQuickTimeCompatible(slice: MediaSlice, out: OutputStream) {
+        copySliceWithTargetBrand(
+            slice = slice,
+            out = out,
+            targetMajorBrand = BRAND_QT,
+            requiredCompatibleBrands = listOf(BRAND_QT)
+        )
+    }
+
+    /**
      * 在 JPEG 单文件中查找内嵌 MP4 片段的偏移。
      *
      * 通过扫描 `ftyp` box 起点推断视频段开始位置。
@@ -188,6 +234,27 @@ object MediaIO {
                 pos += read
             }
             return -1L
+        }
+    }
+
+    /**
+     * 判断给定偏移处是否存在 ISO BMFF `ftyp` 头。
+     *
+     * @param file 目标文件。
+     * @param offset 待校验偏移（指向 box 起始位置）。
+     */
+    fun hasIsoBmffFtypAt(file: File, offset: Long): Boolean {
+        if (offset < 0L) return false
+        RandomAccessFile(file, "r").use { raf ->
+            if (offset + 8 > raf.length()) return false
+            raf.seek(offset + 4)
+            val boxType = ByteArray(4)
+            val read = raf.read(boxType, 0, 4)
+            if (read != 4) return false
+            return boxType[0] == 'f'.code.toByte()
+                && boxType[1] == 't'.code.toByte()
+                && boxType[2] == 'y'.code.toByte()
+                && boxType[3] == 'p'.code.toByte()
         }
     }
 
@@ -231,6 +298,116 @@ object MediaIO {
         val fileSize = slice.sourceFile.length()
         require(slice.offset <= fileSize) { "Slice offset out of file range: ${slice.sourceFile}" }
         require(slice.length <= fileSize - slice.offset) { "Slice range exceeds file size: ${slice.sourceFile}" }
+    }
+
+    /**
+     * 将切片按目标品牌重写 `ftyp` 后复制到输出流。
+     *
+     * @param slice 输入视频切片。
+     * @param out 输出流。
+     * @param targetMajorBrand 目标 `major brand`（4 字节）。
+     * @param requiredCompatibleBrands 需要写入前几个兼容品牌槽位的品牌列表。
+     */
+    private fun copySliceWithTargetBrand(
+        slice: MediaSlice,
+        out: OutputStream,
+        targetMajorBrand: ByteArray,
+        requiredCompatibleBrands: List<ByteArray>
+    ) {
+        validateSliceBounds(slice)
+        RandomAccessFile(slice.sourceFile, "r").use { raf ->
+            val header = ByteArray(12)
+            raf.seek(slice.offset)
+            val headerRead = raf.read(header)
+            require(headerRead == header.size) { "Video slice is too small for ISO BMFF header: ${slice.sourceFile}" }
+            require(
+                header[4] == FTYP_TYPE[0]
+                    && header[5] == FTYP_TYPE[1]
+                    && header[6] == FTYP_TYPE[2]
+                    && header[7] == FTYP_TYPE[3]
+            ) {
+                "Video slice must start with ISO BMFF ftyp box for cross-vendor transcode: ${slice.sourceFile}"
+            }
+
+            val ftypSize = readUInt32(header, 0)
+            require(ftypSize >= MIN_FTYP_BOX_SIZE) { "Invalid ftyp size in video slice: $ftypSize" }
+            require(ftypSize <= slice.length) { "ftyp size exceeds slice length: ${slice.sourceFile}" }
+            require(ftypSize <= Int.MAX_VALUE.toLong()) { "ftyp box is too large to normalize: $ftypSize" }
+
+            val ftypBox = ByteArray(ftypSize.toInt())
+            raf.seek(slice.offset)
+            var readOffset = 0
+            while (readOffset < ftypBox.size) {
+                val read = raf.read(ftypBox, readOffset, ftypBox.size - readOffset)
+                require(read > 0) { "Unexpected EOF while reading ftyp box: ${slice.sourceFile}" }
+                readOffset += read
+            }
+            patchFtypBrands(ftypBox, targetMajorBrand, requiredCompatibleBrands)
+            out.write(ftypBox)
+
+            val remainingOffset = slice.offset + ftypSize
+            val remainingLength = slice.length - ftypSize
+            if (remainingLength > 0L) {
+                copyRange(raf, remainingOffset, remainingLength, out)
+            }
+        }
+    }
+
+    /**
+     * 重写 `ftyp` box 的主品牌与兼容品牌槽位。
+     *
+     * @param ftypBox 完整 `ftyp` box 字节。
+     * @param targetMajorBrand 目标 `major brand`（4 字节）。
+     * @param requiredCompatibleBrands 需要写入的兼容品牌列表。
+     */
+    private fun patchFtypBrands(
+        ftypBox: ByteArray,
+        targetMajorBrand: ByteArray,
+        requiredCompatibleBrands: List<ByteArray>
+    ) {
+        require(targetMajorBrand.size == 4) { "major brand must be 4 bytes." }
+        require(ftypBox.size >= MIN_FTYP_BOX_SIZE.toInt()) { "Invalid ftyp box length: ${ftypBox.size}" }
+        System.arraycopy(targetMajorBrand, 0, ftypBox, 8, 4)
+        val compatibleCount = (ftypBox.size - 16) / 4
+        requiredCompatibleBrands.forEachIndexed { index, brand ->
+            if (index >= compatibleCount) return@forEachIndexed
+            require(brand.size == 4) { "compatible brand must be 4 bytes." }
+            System.arraycopy(brand, 0, ftypBox, 16 + index * 4, 4)
+        }
+    }
+
+    /**
+     * 读取 32 位无符号大端整数。
+     *
+     * @param bytes 输入字节数组。
+     * @param offset 读取起始偏移。
+     */
+    private fun readUInt32(bytes: ByteArray, offset: Int): Long {
+        return ((bytes[offset].toLong() and 0xFFL) shl 24) or
+            ((bytes[offset + 1].toLong() and 0xFFL) shl 16) or
+            ((bytes[offset + 2].toLong() and 0xFFL) shl 8) or
+            (bytes[offset + 3].toLong() and 0xFFL)
+    }
+
+    /**
+     * 复制源文件指定范围到输出流。
+     *
+     * @param raf 源文件随机读取对象。
+     * @param offset 复制起始偏移。
+     * @param length 复制长度。
+     * @param out 输出流。
+     */
+    private fun copyRange(raf: RandomAccessFile, offset: Long, length: Long, out: OutputStream) {
+        raf.seek(offset)
+        var remaining = length
+        val buffer = ByteArray(IO_BUFFER_SIZE)
+        while (remaining > 0) {
+            val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+            val read = raf.read(buffer, 0, toRead)
+            require(read > 0) { "Unexpected EOF while copying media range." }
+            out.write(buffer, 0, read)
+            remaining -= read
+        }
     }
 
     /**

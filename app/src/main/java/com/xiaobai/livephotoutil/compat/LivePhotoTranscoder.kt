@@ -3,6 +3,7 @@ package com.xiaobai.livephotoutil.compat
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.CancellationException
 
 /** LivePhoto 跨厂商格式转码器。 */
 class LivePhotoTranscoder {
@@ -17,15 +18,29 @@ class LivePhotoTranscoder {
      * @param outputDir 输出目录。
      */
     fun transcode(asset: LivePhotoAsset, targetVendor: DeviceVendor, outputDir: File): ConversionResult {
-        require(targetVendor != DeviceVendor.UNKNOWN) { "targetVendor cannot be UNKNOWN" }
-        return DirectoryLockRegistry.withDirectoryLocks(listOf(outputDir)) {
-            outputDir.mkdirs()
-            val profile = VendorProfiles.profileOf(targetVendor)
-            when (profile.mode) {
-                ContainerMode.APPLE_PAIR -> toApplePair(asset, outputDir)
-                ContainerMode.MOTION_PHOTO_JPEG -> toVendorMotionPhoto(asset, profile, outputDir)
-                ContainerMode.RAW_REPLAY -> error("RAW_REPLAY is not a transcode target mode.")
+        if (targetVendor == DeviceVendor.UNKNOWN) {
+            throw LivePhotoSdkException(
+                code = LivePhotoErrorCode.INVALID_INPUT,
+                message = "targetVendor cannot be UNKNOWN"
+            )
+        }
+        try {
+            return DirectoryLockRegistry.withDirectoryLocks(listOf(outputDir)) {
+                outputDir.mkdirs()
+                val profile = VendorProfiles.profileOf(targetVendor)
+                when (profile.mode) {
+                    ContainerMode.APPLE_PAIR -> toApplePair(asset, outputDir)
+                    ContainerMode.MOTION_PHOTO_JPEG -> toVendorMotionPhoto(asset, profile, outputDir)
+                    ContainerMode.RAW_REPLAY -> throw LivePhotoSdkException(
+                        code = LivePhotoErrorCode.UNSUPPORTED_TRANSCODE_TARGET,
+                        message = "RAW_REPLAY is not a transcode target mode."
+                    )
+                }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
         }
     }
 
@@ -38,22 +53,25 @@ class LivePhotoTranscoder {
     private fun toApplePair(asset: LivePhotoAsset, outputDir: File): ConversionResult {
         val baseName = sanitizeName(asset.contentId)
         val imageExt = imageExt(asset.image.mimeType)
-        val videoExt = when (asset.video.mimeType) {
-            "video/quicktime" -> ".mov"
-            "video/mp4" -> ".mp4"
-            else -> if (asset.vendor == DeviceVendor.APPLE) ".mov" else ".mp4"
-        }
         val imageOut = File(outputDir, "$baseName$imageExt")
-        val videoOut = File(outputDir, "$baseName$videoExt")
+        val videoOut = File(outputDir, "$baseName.mov")
         MediaIO.writeSlice(asset.image, imageOut)
-        MediaIO.writeSlice(asset.video, videoOut)
+        MediaIO.writeToFileAtomic(videoOut) { out ->
+            MediaIO.copySliceAsQuickTimeCompatible(asset.video, out)
+        }
+        val assetIdentifier = buildAppleAssetIdentifier(baseName)
         val sidecar = File(outputDir, "$baseName.livephoto.properties")
         val sidecarText = listOf(
             "vendor=APPLE",
             "protocol=APPLE_PAIR",
             "contentId=$baseName",
             "imageFile=${imageOut.name}",
-            "videoFile=${videoOut.name}"
+            "videoFile=${videoOut.name}",
+            "videoContainer=quicktime",
+            "sourceVendor=${asset.vendor.name}",
+            "sourceProtocol=${asset.protocol.name}",
+            "assetIdentifier=$assetIdentifier",
+            "stillImageTimeUs=0"
         ).joinToString("\n")
         MediaIO.writeBytesAtomic(sidecar, sidecarText.toByteArray(StandardCharsets.UTF_8))
         return ConversionResult(
@@ -72,7 +90,10 @@ class LivePhotoTranscoder {
      */
     private fun toVendorMotionPhoto(asset: LivePhotoAsset, profile: VendorProfile, outputDir: File): ConversionResult {
         if (asset.image.mimeType != "image/jpeg") {
-            error("Target ${profile.vendor} motion photo requires JPEG image, got ${asset.image.mimeType}")
+            throw LivePhotoSdkException(
+                code = LivePhotoErrorCode.UNSUPPORTED_TRANSCODE_TARGET,
+                message = "Target ${profile.vendor} motion photo requires JPEG image, got ${asset.image.mimeType}"
+            )
         }
         val imageBytes = MediaIO.readSlice(asset.image)
         val cleanedImage = stripMotionMetadata(imageBytes)
@@ -85,13 +106,22 @@ class LivePhotoTranscoder {
 
         MediaIO.writeToFileAtomic(outFile) { out ->
             out.write(finalJpeg)
-            MediaIO.copySlice(asset.video, out)
+            MediaIO.copySliceAsMp4Compatible(asset.video, out)
         }
         return ConversionResult(
             targetVendor = profile.vendor,
             mode = ContainerMode.MOTION_PHOTO_JPEG,
             outputFiles = listOf(outFile)
         )
+    }
+
+    /**
+     * 生成 Apple 输出 sidecar 使用的资产标识。
+     *
+     * @param normalizedContentId 已清洗的内容标识。
+     */
+    private fun buildAppleAssetIdentifier(normalizedContentId: String): String {
+        return "LP-$normalizedContentId"
     }
 
     /**

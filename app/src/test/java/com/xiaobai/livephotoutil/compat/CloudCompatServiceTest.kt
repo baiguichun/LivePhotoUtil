@@ -72,6 +72,57 @@ class CloudCompatServiceTest {
     }
 
     @Test
+    fun restoreForDevice_fallsBackToCanonicalTranscodeWhenRawReplayCorrupted() {
+        val root = createTempDir("cloud-raw-fallback")
+        try {
+            val canonical = createAppleCanonical(root, "IMG_0201")
+            mutateManifest(canonical.manifestFile) { props ->
+                props["raw.0.sha256"] = "deadbeef"
+            }
+
+            val service = CloudCompatService()
+            val result = service.restoreForDevice(
+                canonicalDir = canonical.dir,
+                targetVendor = DeviceVendor.APPLE,
+                outputDir = File(root, "restore"),
+                preferRawReplay = true
+            )
+
+            assertEquals(ContainerMode.APPLE_PAIR, result.mode)
+            assertTrue(result.outputFiles.any { it.name.endsWith(".jpg", ignoreCase = true) })
+            assertTrue(result.outputFiles.any { it.name.endsWith(".mov", ignoreCase = true) || it.name.endsWith(".mp4", ignoreCase = true) })
+            assertTrue(result.outputFiles.any { it.name.endsWith(".livephoto.properties", ignoreCase = true) })
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun restoreForDevice_throwsWhenCanonicalPayloadChecksumMismatch() {
+        val root = createTempDir("cloud-canonical-checksum")
+        try {
+            val canonical = createAppleCanonical(root, "IMG_0601")
+            val imagePayload = File(canonical.dir, "image.bin")
+            imagePayload.writeBytes(imagePayload.readBytes() + byteArrayOf(0x7F))
+
+            try {
+                CloudCompatService().restoreForDevice(
+                    canonicalDir = canonical.dir,
+                    targetVendor = DeviceVendor.HUAWEI,
+                    outputDir = File(root, "restore"),
+                    preferRawReplay = false
+                )
+                fail("Expected restoreForDevice to reject corrupted canonical payload.")
+            } catch (expected: IllegalArgumentException) {
+                val message = expected.message?.lowercase() ?: ""
+                assertTrue(message.contains("mismatch"))
+            }
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
     fun normalizeForCloud_overwritesStaleCanonicalFiles() {
         val root = createTempDir("cloud-clean-stale")
         try {
@@ -154,7 +205,7 @@ class CloudCompatServiceTest {
     private fun createAppleCanonical(root: File, contentId: String): CanonicalPackage {
         val inputDir = File(root, "input-$contentId").apply { mkdirs() }
         val image = File(inputDir, "$contentId.JPG").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
-        val video = File(inputDir, "$contentId.MOV").apply { writeBytes(byteArrayOf(5, 6, 7, 8, 9)) }
+        val video = File(inputDir, "$contentId.MOV").apply { writeBytes(isoBmffVideo("qt  ")) }
         val asset = LivePhotoAsset(
             vendor = DeviceVendor.APPLE,
             protocol = LivePhotoProtocol.APPLE_PAIR,
@@ -163,6 +214,49 @@ class CloudCompatServiceTest {
             contentId = contentId
         )
         return CloudCompatService().normalizeForCloud(asset, File(root, "cloud-$contentId"))
+    }
+
+    /**
+     * 生成最小可用的 ISO BMFF 视频样本字节。
+     *
+     * @param majorBrand `ftyp` 主品牌（4 字符）。
+     */
+    private fun isoBmffVideo(majorBrand: String): ByteArray {
+        require(majorBrand.length == 4) { "majorBrand must be 4 chars." }
+        val bytes = ByteArray(32)
+        bytes[0] = 0x00
+        bytes[1] = 0x00
+        bytes[2] = 0x00
+        bytes[3] = 0x18
+        bytes[4] = 'f'.code.toByte()
+        bytes[5] = 't'.code.toByte()
+        bytes[6] = 'y'.code.toByte()
+        bytes[7] = 'p'.code.toByte()
+        bytes[8] = majorBrand[0].code.toByte()
+        bytes[9] = majorBrand[1].code.toByte()
+        bytes[10] = majorBrand[2].code.toByte()
+        bytes[11] = majorBrand[3].code.toByte()
+        bytes[12] = 0x00
+        bytes[13] = 0x00
+        bytes[14] = 0x00
+        bytes[15] = 0x00
+        bytes[16] = 'i'.code.toByte()
+        bytes[17] = 's'.code.toByte()
+        bytes[18] = 'o'.code.toByte()
+        bytes[19] = 'm'.code.toByte()
+        bytes[20] = 'm'.code.toByte()
+        bytes[21] = 'p'.code.toByte()
+        bytes[22] = '4'.code.toByte()
+        bytes[23] = '2'.code.toByte()
+        bytes[24] = 0x00
+        bytes[25] = 0x00
+        bytes[26] = 0x00
+        bytes[27] = 0x08
+        bytes[28] = 'm'.code.toByte()
+        bytes[29] = 'd'.code.toByte()
+        bytes[30] = 'a'.code.toByte()
+        bytes[31] = 't'.code.toByte()
+        return bytes
     }
 
     /**

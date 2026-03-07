@@ -1,9 +1,11 @@
 package com.xiaobai.livephotoutil.compat
 
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /** [LivePhotoCoroutineSdk] 协程入口测试。 */
@@ -31,6 +33,34 @@ class LivePhotoCoroutineSdkTest {
             assertEquals(ContainerMode.RAW_REPLAY, restored.mode)
             assertTrue(restored.outputFiles.any { it.name == "IMG_2001.JPG" })
             assertTrue(restored.outputFiles.any { it.name == "IMG_2001.MOV" })
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun detect_rethrowsCancellationExceptionWithoutMapping() = runBlocking {
+        val root = createTempDir("coroutine-cancel")
+        try {
+            val candidate = File(root, "IMG_3001.JPG").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+            val cancellingAdapter = object : LivePhotoAdapter {
+                override val id: String = "cancel-test"
+                override val priority: Int = 1
+
+                override fun probe(input: ProbeInput): LivePhotoAsset? {
+                    throw CancellationException("cancelled for test")
+                }
+            }
+            val sdk = LivePhotoCoroutineSdk(
+                engine = LivePhotoCompatEngine(listOf(cancellingAdapter))
+            )
+
+            try {
+                sdk.detect(listOf(candidate))
+                fail("Expected detect to rethrow CancellationException.")
+            } catch (expected: CancellationException) {
+                assertEquals("cancelled for test", expected.message)
+            }
         } finally {
             deleteRecursively(root)
         }

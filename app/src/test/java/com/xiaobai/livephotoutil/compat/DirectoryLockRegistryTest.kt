@@ -40,6 +40,29 @@ class DirectoryLockRegistryTest {
         }
     }
 
+    @Test
+    fun withDirectoryLocks_releasesUnusedEntries() {
+        val root = createTempDir("dir-lock-cleanup")
+        try {
+            val lockMapField = DirectoryLockRegistry::class.java.getDeclaredField("lockMap")
+            lockMapField.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val lockMap = lockMapField.get(DirectoryLockRegistry) as MutableMap<String, *>
+            val beforeSize = lockMap.size
+
+            repeat(20) { index ->
+                val dir = File(root, "d$index").apply { mkdirs() }
+                DirectoryLockRegistry.withDirectoryLocks(listOf(dir)) {
+                    // no-op
+                }
+            }
+
+            assertEquals(beforeSize, lockMap.size)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
     /**
      * 创建测试临时目录。
      *

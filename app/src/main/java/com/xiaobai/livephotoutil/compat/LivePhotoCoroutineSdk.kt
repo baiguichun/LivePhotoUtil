@@ -1,6 +1,7 @@
 package com.xiaobai.livephotoutil.compat
 
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,7 +29,13 @@ class LivePhotoCoroutineSdk(
      * @return 识别到的资产，未识别返回 `null`。
      */
     suspend fun detect(candidates: List<File>): LivePhotoAsset? = withContext(ioDispatcher) {
-        engine.detect(candidates)
+        try {
+            engine.detect(candidates)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
+        }
     }
 
     /**
@@ -38,7 +45,13 @@ class LivePhotoCoroutineSdk(
      * @return 识别到的资产。
      */
     suspend fun detectOrThrow(candidates: List<File>): LivePhotoAsset = withContext(ioDispatcher) {
-        engine.detectOrThrow(candidates)
+        try {
+            engine.detectOrThrow(candidates)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
+        }
     }
 
     /**
@@ -53,7 +66,13 @@ class LivePhotoCoroutineSdk(
         targetVendor: DeviceVendor,
         outputDir: File
     ): ConversionResult = withContext(ioDispatcher) {
-        transcoder.transcode(asset, targetVendor, outputDir)
+        try {
+            transcoder.transcode(asset, targetVendor, outputDir)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
+        }
     }
 
     /**
@@ -68,8 +87,14 @@ class LivePhotoCoroutineSdk(
         targetVendor: DeviceVendor,
         outputDir: File
     ): ConversionResult = withContext(ioDispatcher) {
-        val asset = engine.detectOrThrow(candidates)
-        transcoder.transcode(asset, targetVendor, outputDir)
+        try {
+            val asset = engine.detectOrThrow(candidates)
+            transcoder.transcode(asset, targetVendor, outputDir)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
+        }
     }
 
     /**
@@ -79,7 +104,13 @@ class LivePhotoCoroutineSdk(
      * @param cloudDir 归档目录。
      */
     suspend fun normalizeForCloud(asset: LivePhotoAsset, cloudDir: File): CanonicalPackage = withContext(ioDispatcher) {
-        cloudService.normalizeForCloud(asset, cloudDir)
+        try {
+            cloudService.normalizeForCloud(asset, cloudDir)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
+        }
     }
 
     /**
@@ -90,8 +121,14 @@ class LivePhotoCoroutineSdk(
      */
     suspend fun detectAndNormalizeForCloud(candidates: List<File>, cloudDir: File): CanonicalPackage =
         withContext(ioDispatcher) {
-            val asset = engine.detectOrThrow(candidates)
-            cloudService.normalizeForCloud(asset, cloudDir)
+            try {
+                val asset = engine.detectOrThrow(candidates)
+                cloudService.normalizeForCloud(asset, cloudDir)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Exception) {
+                throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
+            }
         }
 
     /**
@@ -108,7 +145,13 @@ class LivePhotoCoroutineSdk(
         outputDir: File,
         preferRawReplay: Boolean = true
     ): ConversionResult = withContext(ioDispatcher) {
-        cloudService.restoreForDevice(canonicalDir, targetVendor, outputDir, preferRawReplay)
+        try {
+            cloudService.restoreForDevice(canonicalDir, targetVendor, outputDir, preferRawReplay)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
+        }
     }
 
     /**
@@ -118,6 +161,12 @@ class LivePhotoCoroutineSdk(
      * @param outputDir 输出目录。
      */
     suspend fun restoreOriginal(canonicalDir: File, outputDir: File): List<File> = withContext(ioDispatcher) {
-        cloudService.restoreOriginal(canonicalDir, outputDir)
+        try {
+            cloudService.restoreOriginal(canonicalDir, outputDir)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
+        }
     }
 }

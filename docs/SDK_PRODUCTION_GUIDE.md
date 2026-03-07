@@ -4,9 +4,13 @@
 
 - 输入识别：自动识别 LivePhoto 资源（Apple 双文件 / Android MotionPhoto / 通用图片+视频配对）。
 - 格式转换：把统一资产转为目标厂商可识别格式。
+- 容器规范化：转码时自动把视频容器头规范化为目标阵营可识别格式（Apple=QuickTime，Android MotionPhoto=MP4 兼容）。
 - 云端中间格式：把资源归档为统一 canonical 包，跨设备再恢复。
 - 原样回放：同厂商场景可优先直接回放原始文件（文件名、字节、修改时间保持一致）。
+- 严格校验：MotionPhoto 识别要求 XMP + `MicroVideoOffset` + `ftyp` 一致性。
+- 完整性保护：恢复前校验 canonical `image/video` 的 size + SHA-256。
 - 协程接口：提供 `suspend` API，内部自动切换 `Dispatchers.IO`。
+- 协程取消：`CancellationException` 透传，不会被包装成业务异常。
 
 ## 2. 支持的协议与厂商
 
@@ -29,11 +33,16 @@
 
 - 输入 -> 统一资产：`LivePhotoCompatEngine.detect(...)`
 - 统一资产 -> 目标厂商：
-  - 目标 Apple：输出双文件（图片 + `.mov/.mp4`）+ sidecar。
-  - 目标 Android 厂商（Google/Huawei/vivo/OPPO/Xiaomi）：输出单 JPEG MotionPhoto。
+  - 目标 Apple：输出双文件（图片 + `.mov`）+ sidecar（包含 `assetIdentifier`、`stillImageTimeUs`）。
+  - 目标 Android 厂商（Google/Huawei/vivo/OPPO/Xiaomi）：输出单 JPEG MotionPhoto，尾部视频为 MP4 兼容容器。
 - 云端 canonical -> 目标设备：
   - 同厂商且 `preferRawReplay=true`：优先 `RAW_REPLAY`。
   - 其他场景：使用中间格式 `image.bin + video.bin` 转码恢复。
+
+前提约束：
+
+- 跨厂商转码要求 `asset.video` 为 ISO BMFF（MP4/QuickTime）切片；若不是该容器，SDK 会拒绝转码。
+- 本 SDK 对 Apple 的目标是“SDK 接入 App 内可识别回放”；若要求系统相册级导入，还需业务层补充 Apple 专用媒体元数据流程。
 
 ## 4. 云端中间格式规范
 
@@ -54,6 +63,8 @@ canonical 目录结构：
 - `vendor` / `protocol` / `contentId`
 - `imageMime` / `videoMime`
 - `rawFileCount`
+- `imageSize` / `videoSize`
+- `imageSha256` / `videoSha256`
 - `raw.{i}.originalName`
 - `raw.{i}.storedName`
 - `raw.{i}.size`
@@ -64,6 +75,7 @@ canonical 目录结构：
 
 - `raw/` 用于原样回放。
 - `image.bin/video.bin` 用于跨协议恢复。
+- `image/video` 在恢复前会进行完整性校验（size + sha256）。
 - 同一 `cloudDir` 重复归档时会清理旧文件，避免脏数据残留。
 
 ## 5. 协程接入方式
@@ -128,3 +140,26 @@ val result = sdk.restoreForDevice(
 - 大文件场景优先使用协程 API，避免主线程阻塞。
 - 对外暴露错误时建议映射成业务错误码（如：探测失败、清单损坏、校验失败、目标厂商不支持）。
 - 发布前至少执行：`./gradlew test lintDebug`。
+- 强烈建议将 SDK 输出目录与业务临时目录隔离，降低并发冲突概率。
+
+## 10. 发布与版本治理
+
+- 采用 `maven-publish`，默认发布到本地仓库：`./gradlew :app:publishReleasePublicationToMavenLocal`。
+- SDK 坐标由 `gradle.properties` 管理：
+  - `sdk.group`
+  - `sdk.artifact`
+  - `sdk.version`
+- 强制使用语义化版本（SemVer）：
+  - `MAJOR`：破坏兼容的 API 变更
+  - `MINOR`：向后兼容的能力新增
+  - `PATCH`：向后兼容的问题修复
+- 每次发版前执行兼容性清单：
+  - 运行 `./gradlew test`
+  - 更新发布说明（新增能力、修复项、兼容性影响）
+  - 检查公开 API 的参数/返回类型是否发生破坏式变化
+
+## 11. 文档索引
+
+- 架构说明：`docs/SDK_ARCHITECTURE.md`
+- API 参考：`docs/SDK_API_REFERENCE.md`
+- 生产清单：`docs/SDK_PROD_CHECKLIST.md`

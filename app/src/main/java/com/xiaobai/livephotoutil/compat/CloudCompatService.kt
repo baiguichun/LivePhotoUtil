@@ -5,6 +5,7 @@ import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.LinkedHashMap
 import java.util.Properties
+import kotlinx.coroutines.CancellationException
 
 /**
  * 云端兼容服务：统一上传格式并按目标设备恢复。
@@ -26,46 +27,56 @@ class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhoto
      * @param cloudDir 云端规范包输出目录。
      */
     fun normalizeForCloud(asset: LivePhotoAsset, cloudDir: File): CanonicalPackage {
-        return DirectoryLockRegistry.withDirectoryLocks(listOf(cloudDir)) {
-            val imageFile = File(cloudDir, "image.bin")
-            val videoFile = File(cloudDir, "video.bin")
-            val manifestFile = File(cloudDir, "manifest.properties")
-            val rawDir = File(cloudDir, "raw")
-            prepareCanonicalDirectory(cloudDir, imageFile, videoFile, manifestFile, rawDir)
+        try {
+            return DirectoryLockRegistry.withDirectoryLocks(listOf(cloudDir)) {
+                val imageFile = File(cloudDir, "image.bin")
+                val videoFile = File(cloudDir, "video.bin")
+                val manifestFile = File(cloudDir, "manifest.properties")
+                val rawDir = File(cloudDir, "raw")
+                prepareCanonicalDirectory(cloudDir, imageFile, videoFile, manifestFile, rawDir)
 
-            MediaIO.writeSlice(asset.image, imageFile)
-            MediaIO.writeSlice(asset.video, videoFile)
+                MediaIO.writeSlice(asset.image, imageFile)
+                MediaIO.writeSlice(asset.video, videoFile)
 
-            val properties = Properties()
-            properties["vendor"] = asset.vendor.name
-            properties["protocol"] = asset.protocol.name
-            properties["contentId"] = asset.contentId
-            properties["imageMime"] = asset.image.mimeType
-            properties["videoMime"] = asset.video.mimeType
-            val rawSources = collectRawSources(asset)
-            properties["rawFileCount"] = rawSources.size.toString()
-            rawSources.forEachIndexed { index, source ->
-                val storedName = "${index}_${sanitizeRawName(source.name)}"
-                val target = File(rawDir, storedName)
-                copyFile(source, target)
-                properties["raw.$index.originalName"] = source.name
-                properties["raw.$index.storedName"] = storedName
-                properties["raw.$index.size"] = source.length().toString()
-                properties["raw.$index.lastModified"] = source.lastModified().toString()
-                properties["raw.$index.sha256"] = sha256(target)
+                val properties = Properties()
+                properties["vendor"] = asset.vendor.name
+                properties["protocol"] = asset.protocol.name
+                properties["contentId"] = asset.contentId
+                properties["imageMime"] = asset.image.mimeType
+                properties["videoMime"] = asset.video.mimeType
+                properties["imageSize"] = imageFile.length().toString()
+                properties["videoSize"] = videoFile.length().toString()
+                properties["imageSha256"] = sha256(imageFile)
+                properties["videoSha256"] = sha256(videoFile)
+                val rawSources = collectRawSources(asset)
+                properties["rawFileCount"] = rawSources.size.toString()
+                rawSources.forEachIndexed { index, source ->
+                    val storedName = "${index}_${sanitizeRawName(source.name)}"
+                    val target = File(rawDir, storedName)
+                    copyFile(source, target)
+                    properties["raw.$index.originalName"] = source.name
+                    properties["raw.$index.storedName"] = storedName
+                    properties["raw.$index.size"] = source.length().toString()
+                    properties["raw.$index.lastModified"] = source.lastModified().toString()
+                    properties["raw.$index.sha256"] = sha256(target)
+                }
+
+                MediaIO.writeToFileAtomic(manifestFile) { out ->
+                    properties.store(out, "LivePhoto canonical package")
+                }
+
+                CanonicalPackage(
+                    dir = cloudDir,
+                    imageFile = imageFile,
+                    videoFile = videoFile,
+                    manifestFile = manifestFile,
+                    rawDir = rawDir
+                )
             }
-
-            MediaIO.writeToFileAtomic(manifestFile) { out ->
-                properties.store(out, "LivePhoto canonical package")
-            }
-
-            CanonicalPackage(
-                dir = cloudDir,
-                imageFile = imageFile,
-                videoFile = videoFile,
-                manifestFile = manifestFile,
-                rawDir = rawDir
-            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
         }
     }
 
@@ -83,34 +94,51 @@ class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhoto
         outputDir: File,
         preferRawReplay: Boolean = true
     ): ConversionResult {
-        require(targetVendor != DeviceVendor.UNKNOWN) { "targetVendor cannot be UNKNOWN" }
-        return DirectoryLockRegistry.withDirectoryLocks(listOf(canonicalDir, outputDir)) {
-            val manifest = File(canonicalDir, "manifest.properties")
-            require(manifest.exists()) { "Missing canonical manifest: $manifest" }
-            val props = Properties()
-            FileInputStream(manifest).use { props.load(it) }
-
-            if (preferRawReplay) {
-                val rawReplay = restoreRawWhenVendorMatches(props, canonicalDir, targetVendor, outputDir)
-                if (rawReplay != null) return@withDirectoryLocks rawReplay
-            }
-
-            val contentId = props.getProperty("contentId", "livephoto")
-            val imageMime = props.getProperty("imageMime", "image/jpeg")
-            val videoMime = props.getProperty("videoMime", "video/mp4")
-            val image = File(canonicalDir, "image.bin")
-            val video = File(canonicalDir, "video.bin")
-            require(image.exists() && video.exists()) { "Canonical media files are missing." }
-
-            val asset = LivePhotoAsset(
-                vendor = DeviceVendor.UNKNOWN,
-                protocol = LivePhotoProtocol.GENERIC_PAIR,
-                image = MediaSlice(image, 0L, image.length(), imageMime),
-                video = MediaSlice(video, 0L, video.length(), videoMime),
-                contentId = contentId,
-                notes = listOf("Restored from cloud canonical package.")
+        if (targetVendor == DeviceVendor.UNKNOWN) {
+            throw LivePhotoSdkException(
+                code = LivePhotoErrorCode.INVALID_INPUT,
+                message = "targetVendor cannot be UNKNOWN"
             )
-            transcoder.transcode(asset, targetVendor, outputDir)
+        }
+        try {
+            return DirectoryLockRegistry.withDirectoryLocks(listOf(canonicalDir, outputDir)) {
+                val manifest = File(canonicalDir, "manifest.properties")
+                require(manifest.exists()) { "Missing canonical manifest: $manifest" }
+                val props = Properties()
+                FileInputStream(manifest).use { props.load(it) }
+
+                if (preferRawReplay) {
+                    val rawReplay = try {
+                        restoreRawWhenVendorMatches(props, canonicalDir, targetVendor, outputDir)
+                    } catch (_: Exception) {
+                        // Raw 回放失败时自动回退到 canonical 转码，避免恢复流程整体失败。
+                        null
+                    }
+                    if (rawReplay != null) return@withDirectoryLocks rawReplay
+                }
+
+                val contentId = props.getProperty("contentId", "livephoto")
+                val imageMime = props.getProperty("imageMime", "image/jpeg")
+                val videoMime = props.getProperty("videoMime", "video/mp4")
+                val image = File(canonicalDir, "image.bin")
+                val video = File(canonicalDir, "video.bin")
+                require(image.exists() && video.exists()) { "Canonical media files are missing." }
+                verifyCanonicalMediaIntegrity(props, image, video)
+
+                val asset = LivePhotoAsset(
+                    vendor = DeviceVendor.UNKNOWN,
+                    protocol = LivePhotoProtocol.GENERIC_PAIR,
+                    image = MediaSlice(image, 0L, image.length(), imageMime),
+                    video = MediaSlice(video, 0L, video.length(), videoMime),
+                    contentId = contentId,
+                    notes = listOf("Restored from cloud canonical package.")
+                )
+                transcoder.transcode(asset, targetVendor, outputDir)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
         }
     }
 
@@ -121,12 +149,18 @@ class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhoto
      * @param outputDir 本地恢复目录。
      */
     fun restoreOriginal(canonicalDir: File, outputDir: File): List<File> {
-        return DirectoryLockRegistry.withDirectoryLocks(listOf(canonicalDir, outputDir)) {
-            val manifest = File(canonicalDir, "manifest.properties")
-            require(manifest.exists()) { "Missing canonical manifest: $manifest" }
-            val props = Properties()
-            FileInputStream(manifest).use { props.load(it) }
-            restoreRawFiles(props, canonicalDir, outputDir)
+        try {
+            return DirectoryLockRegistry.withDirectoryLocks(listOf(canonicalDir, outputDir)) {
+                val manifest = File(canonicalDir, "manifest.properties")
+                require(manifest.exists()) { "Missing canonical manifest: $manifest" }
+                val props = Properties()
+                FileInputStream(manifest).use { props.load(it) }
+                restoreRawFiles(props, canonicalDir, outputDir)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (throwable: Exception) {
+            throw LivePhotoErrorMapper.map(throwable, LivePhotoErrorCode.INTERNAL_ERROR)
         }
     }
 
@@ -252,6 +286,34 @@ class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhoto
      */
     private fun requireProperty(props: Properties, key: String): String {
         return props.getProperty(key) ?: error("Missing required manifest key: $key")
+    }
+
+    /**
+     * 校验 canonical 主载荷（image/video）的大小与摘要完整性。
+     *
+     * 兼容旧格式：若清单中不存在对应字段则跳过该字段校验。
+     *
+     * @param props 清单属性集合。
+     * @param image 规范包图片文件。
+     * @param video 规范包视频文件。
+     */
+    private fun verifyCanonicalMediaIntegrity(props: Properties, image: File, video: File) {
+        val expectedImageSize = props.getProperty("imageSize")?.toLongOrNull()
+        if (expectedImageSize != null) {
+            require(image.length() == expectedImageSize) { "Canonical image size mismatch: $image" }
+        }
+        val expectedVideoSize = props.getProperty("videoSize")?.toLongOrNull()
+        if (expectedVideoSize != null) {
+            require(video.length() == expectedVideoSize) { "Canonical video size mismatch: $video" }
+        }
+        val expectedImageSha = props.getProperty("imageSha256")
+        if (!expectedImageSha.isNullOrBlank()) {
+            require(sha256(image) == expectedImageSha) { "Canonical image checksum mismatch: $image" }
+        }
+        val expectedVideoSha = props.getProperty("videoSha256")
+        if (!expectedVideoSha.isNullOrBlank()) {
+            require(sha256(video) == expectedVideoSha) { "Canonical video checksum mismatch: $video" }
+        }
     }
 
     /**
