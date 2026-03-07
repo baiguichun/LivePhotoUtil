@@ -1,0 +1,136 @@
+@startuml
+title LivePhotoCompat SDK - Core Class Diagram
+
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+
+package "com.xiaobai.livephotoutil.compat" {
+  enum DeviceVendor
+  enum LivePhotoProtocol
+  enum ContainerMode
+  enum LivePhotoErrorCode
+
+  class MediaSlice {
+    +sourceFile: File
+    +offset: Long
+    +length: Long
+    +mimeType: String
+  }
+
+  class LivePhotoAsset {
+    +vendor: DeviceVendor
+    +protocol: LivePhotoProtocol
+    +image: MediaSlice
+    +video: MediaSlice
+    +contentId: String
+    +notes: List<String>
+  }
+
+  class ConversionResult {
+    +targetVendor: DeviceVendor
+    +mode: ContainerMode
+    +outputFiles: List<File>
+  }
+
+  class CanonicalPackage {
+    +dir: File
+    +imageFile: File
+    +videoFile: File
+    +manifestFile: File
+    +rawDir: File
+  }
+
+  class ProbeInput
+  interface LivePhotoAdapter
+  class ApplePairAdapter
+  class VendorMotionPhotoAdapter
+  class GenericPairAdapter
+
+  class VendorProfile
+  class VendorProfiles <<object>>
+
+  class LivePhotoCompatEngine
+  class LivePhotoTranscoder
+  class CloudCompatService
+  class LivePhotoCoroutineSdk
+
+  class LivePhotoSdkException
+  class LivePhotoErrorMapper <<object>>
+
+  class MediaIO <<object>>
+  class DirectoryLockRegistry <<object>>
+}
+
+ApplePairAdapter ..|> LivePhotoAdapter
+VendorMotionPhotoAdapter ..|> LivePhotoAdapter
+GenericPairAdapter ..|> LivePhotoAdapter
+
+VendorMotionPhotoAdapter --> VendorProfile
+VendorProfiles --> VendorProfile
+
+LivePhotoCompatEngine --> LivePhotoAdapter : probe()
+LivePhotoCompatEngine --> ProbeInput
+LivePhotoCompatEngine --> LivePhotoAsset : detect()
+
+LivePhotoTranscoder --> LivePhotoAsset : transcode(input)
+LivePhotoTranscoder --> ConversionResult : transcode(output)
+LivePhotoTranscoder --> VendorProfiles
+LivePhotoTranscoder --> MediaIO
+LivePhotoTranscoder --> DirectoryLockRegistry
+
+CloudCompatService --> LivePhotoTranscoder
+CloudCompatService --> CanonicalPackage : normalizeForCloud()
+CloudCompatService --> ConversionResult : restoreForDevice()
+CloudCompatService --> MediaIO
+CloudCompatService --> DirectoryLockRegistry
+
+LivePhotoCoroutineSdk --> LivePhotoCompatEngine
+LivePhotoCoroutineSdk --> LivePhotoTranscoder
+LivePhotoCoroutineSdk --> CloudCompatService
+
+LivePhotoErrorMapper --> LivePhotoSdkException
+LivePhotoSdkException --> LivePhotoErrorCode
+
+LivePhotoAsset --> MediaSlice
+ConversionResult --> ContainerMode
+ConversionResult --> DeviceVendor
+LivePhotoAsset --> DeviceVendor
+LivePhotoAsset --> LivePhotoProtocol
+
+note right of CloudCompatService
+  Canonical package layout:
+  - manifest.properties
+  - image.bin
+  - video.bin
+  - raw/*
+end note
+
+@enduml
+
+@startuml
+title LivePhotoCompat SDK - Detect -> Normalize -> Restore Sequence
+
+actor Client
+participant "LivePhotoCoroutineSdk" as SDK
+participant "LivePhotoCompatEngine" as Engine
+participant "CloudCompatService" as Cloud
+participant "LivePhotoTranscoder" as Transcoder
+
+Client -> SDK : detectAndNormalizeForCloud(candidates, cloudDir)
+SDK -> Engine : detectOrThrow(candidates)
+Engine --> SDK : LivePhotoAsset
+SDK -> Cloud : normalizeForCloud(asset, cloudDir)
+Cloud --> SDK : CanonicalPackage
+SDK --> Client : CanonicalPackage
+
+Client -> SDK : restoreForDevice(canonicalDir, targetVendor, outputDir)
+SDK -> Cloud : restoreForDevice(...)
+alt source vendor == target vendor and raw replay valid
+  Cloud --> SDK : ConversionResult(mode=RAW_REPLAY)
+else fallback canonical transcode
+  Cloud -> Transcoder : transcode(asset, targetVendor, outputDir)
+  Transcoder --> Cloud : ConversionResult(mode=APPLE_PAIR/MOTION_PHOTO_JPEG)
+  Cloud --> SDK : ConversionResult
+end
+SDK --> Client : ConversionResult
+@enduml

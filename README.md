@@ -94,3 +94,4 @@ val result = sdk.restoreForDevice(
 - [docs/SDK_ARCHITECTURE.md](docs/SDK_ARCHITECTURE.md)
 - [docs/SDK_API_REFERENCE.md](docs/SDK_API_REFERENCE.md)
 - [docs/SDK_PROD_CHECKLIST.md](docs/SDK_PROD_CHECKLIST.md)
+- [docs/SDK_UML.puml](docs/SDK_UML.puml)
