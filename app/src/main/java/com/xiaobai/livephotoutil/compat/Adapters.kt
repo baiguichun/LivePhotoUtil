@@ -181,7 +181,7 @@ private fun matchesVendorMotionMetadata(metadata: MotionPhotoProbeMetadata, prof
     val markerMatched = profile.detectMarkers.any { marker -> metadata.xmpPacket.contains(marker) }
     if (!markerMatched) return false
     if (profile.xmpAttributes.isEmpty()) return true
-    return profile.xmpAttributes.any { (name, value) ->
+    return profile.xmpAttributes.all { (name, value) ->
         hasExactXmpAttribute(metadata.xmpPacket, name, value)
     }
 }
@@ -271,6 +271,7 @@ class ApplePairAdapter : LivePhotoAdapter {
             if (input.mimeOf(video) == "video/quicktime") 1 else 0
         } ?: return null
         if (pairResult.best.score < 2) return null
+        if (pairResult.secondBestScore != null && pairResult.best.score == pairResult.secondBestScore) return null
         val id = NameHeuristics.normalizedStem(pairResult.best.image)
             .ifBlank { NameHeuristics.stem(pairResult.best.image) }
         return LivePhotoAsset(

@@ -25,6 +25,22 @@ class LivePhotoCompatEngineTest {
     }
 
     @Test
+    fun detectApplePair_rejectsAmbiguousTieCandidates() {
+        val root = createTempDir("engine-apple-ambiguous")
+        try {
+            val imageA = File(root, "session_alpha_cover.jpg").apply { writeBytes(fakeJpeg("plain")) }
+            val imageB = File(root, "session_beta_cover.jpg").apply { writeBytes(fakeJpeg("plain")) }
+            val videoA = File(root, "session_gamma_clip.mov").apply { writeBytes(fakeVideo("qt  ")) }
+            val videoB = File(root, "session_delta_clip.mov").apply { writeBytes(fakeVideo("qt  ")) }
+
+            val detected = LivePhotoCompatEngine.defaultEngine().detect(listOf(imageA, imageB, videoA, videoB))
+            assertNull(detected)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
     fun detectVendorMotionPhoto_identifiesHuaweiTranscodedFile() {
         val root = createTempDir("engine-huawei")
         try {
@@ -60,6 +76,20 @@ class LivePhotoCompatEngineTest {
         try {
             val motion = createVendorMotionPhoto(root, DeviceVendor.HUAWEI, "offset_bad")
             corruptMicroVideoOffset(motion)
+
+            val detected = LivePhotoCompatEngine.defaultEngine().detect(listOf(motion))
+            assertNull(detected)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun detectVendorMotionPhoto_rejectsWhenVendorAttributesIncomplete() {
+        val root = createTempDir("engine-attr-incomplete")
+        try {
+            val motion = createVendorMotionPhoto(root, DeviceVendor.HUAWEI, "attr_bad")
+            removeXmpAttribute(motion, "HUAWEI:MotionPhoto")
 
             val detected = LivePhotoCompatEngine.defaultEngine().detect(listOf(motion))
             assertNull(detected)
@@ -145,6 +175,20 @@ class LivePhotoCompatEngineTest {
         val pattern = Regex("GCamera:MicroVideoOffset=\"\\d{10}\"")
         val replaced = content.replaceFirst(pattern, "GCamera:MicroVideoOffset=\"0000000000\"")
         assertTrue("Test fixture must contain MicroVideoOffset.", replaced != content)
+        file.writeBytes(replaced.toByteArray(StandardCharsets.ISO_8859_1))
+    }
+
+    /**
+     * 移除 XMP 中指定属性（`name="value"`）用于构造属性不完整样本。
+     *
+     * @param file 待篡改文件。
+     * @param attributeName 待移除属性名。
+     */
+    private fun removeXmpAttribute(file: File, attributeName: String) {
+        val content = String(file.readBytes(), StandardCharsets.ISO_8859_1)
+        val pattern = Regex("\\s${Regex.escape(attributeName)}=\"[^\"]*\"")
+        val replaced = content.replaceFirst(pattern, "")
+        assertTrue("Test fixture must contain $attributeName.", replaced != content)
         file.writeBytes(replaced.toByteArray(StandardCharsets.ISO_8859_1))
     }
 

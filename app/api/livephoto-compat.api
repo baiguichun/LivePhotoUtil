@@ -32,8 +32,8 @@ public final class com.xiaobai.livephotoutil.compat.CanonicalPackage {
 
 ### com.xiaobai.livephotoutil.compat.CloudCompatService
 public final class com.xiaobai.livephotoutil.compat.CloudCompatService {
-  public com.xiaobai.livephotoutil.compat.CloudCompatService(com.xiaobai.livephotoutil.compat.LivePhotoTranscoder);
-  public com.xiaobai.livephotoutil.compat.CloudCompatService(com.xiaobai.livephotoutil.compat.LivePhotoTranscoder, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public com.xiaobai.livephotoutil.compat.CloudCompatService(com.xiaobai.livephotoutil.compat.LivePhotoTranscoder, byte[], java.lang.String, java.util.Map<java.lang.String, byte[]>, com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy);
+  public com.xiaobai.livephotoutil.compat.CloudCompatService(com.xiaobai.livephotoutil.compat.LivePhotoTranscoder, byte[], java.lang.String, java.util.Map, com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final com.xiaobai.livephotoutil.compat.CanonicalPackage normalizeForCloud(com.xiaobai.livephotoutil.compat.LivePhotoAsset, java.io.File);
   public final com.xiaobai.livephotoutil.compat.ConversionResult restoreForDevice(java.io.File, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File, boolean);
   public static com.xiaobai.livephotoutil.compat.ConversionResult restoreForDevice$default(com.xiaobai.livephotoutil.compat.CloudCompatService, java.io.File, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File, boolean, int, java.lang.Object);
@@ -65,6 +65,12 @@ public final class com.xiaobai.livephotoutil.compat.ConversionResult {
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);
+}
+
+### com.xiaobai.livephotoutil.compat.DefaultVideoCompatibilityNormalizer
+public final class com.xiaobai.livephotoutil.compat.DefaultVideoCompatibilityNormalizer implements com.xiaobai.livephotoutil.compat.VideoCompatibilityNormalizer {
+  public static final com.xiaobai.livephotoutil.compat.DefaultVideoCompatibilityNormalizer INSTANCE;
+  public com.xiaobai.livephotoutil.compat.MediaSlice normalize(com.xiaobai.livephotoutil.compat.MediaSlice, com.xiaobai.livephotoutil.compat.VideoContainerTarget, java.io.File);
 }
 
 ### com.xiaobai.livephotoutil.compat.DeviceVendor
@@ -192,8 +198,20 @@ public final class com.xiaobai.livephotoutil.compat.LivePhotoSdkException extend
 
 ### com.xiaobai.livephotoutil.compat.LivePhotoTranscoder
 public final class com.xiaobai.livephotoutil.compat.LivePhotoTranscoder {
-  public com.xiaobai.livephotoutil.compat.LivePhotoTranscoder();
+  public com.xiaobai.livephotoutil.compat.LivePhotoTranscoder(com.xiaobai.livephotoutil.compat.VideoCompatibilityNormalizer);
+  public com.xiaobai.livephotoutil.compat.LivePhotoTranscoder(com.xiaobai.livephotoutil.compat.VideoCompatibilityNormalizer, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final com.xiaobai.livephotoutil.compat.ConversionResult transcode(com.xiaobai.livephotoutil.compat.LivePhotoAsset, com.xiaobai.livephotoutil.compat.DeviceVendor, java.io.File);
+  public com.xiaobai.livephotoutil.compat.LivePhotoTranscoder();
+}
+
+### com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy
+public final class com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy extends java.lang.Enum<com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy> {
+  public static final com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy OPTIONAL;
+  public static final com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy REQUIRE_WHEN_KEY_CONFIGURED;
+  public static final com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy REQUIRED;
+  public static com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy[] values();
+  public static com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<com.xiaobai.livephotoutil.compat.ManifestSignaturePolicy> getEntries();
 }
 
 ### com.xiaobai.livephotoutil.compat.MediaIO
@@ -208,10 +226,13 @@ public final class com.xiaobai.livephotoutil.compat.MediaIO {
   public final void writeSlice(com.xiaobai.livephotoutil.compat.MediaSlice, java.io.File);
   public final void writeToFileAtomic(java.io.File, kotlin.jvm.functions.Function1<? super java.io.OutputStream, kotlin.Unit>);
   public final void writeBytesAtomic(java.io.File, byte[]);
+  public final long estimateJpegWithoutMotionMetadataAndInjectedXmpSize(com.xiaobai.livephotoutil.compat.MediaSlice, java.lang.String);
+  public final long copyJpegWithoutMotionMetadataAndInjectXmp(com.xiaobai.livephotoutil.compat.MediaSlice, java.lang.String, java.io.OutputStream);
   public final void copySliceAsMp4Compatible(com.xiaobai.livephotoutil.compat.MediaSlice, java.io.OutputStream);
   public final void copySliceAsQuickTimeCompatible(com.xiaobai.livephotoutil.compat.MediaSlice, java.io.OutputStream);
   public final long findEmbeddedMp4Offset(java.io.File);
   public final boolean hasIsoBmffFtypAt(java.io.File, long);
+  public final boolean isIsoBmffSlice$app(com.xiaobai.livephotoutil.compat.MediaSlice);
   public final byte[] readPrefix(java.io.File, int);
 }
 
@@ -253,6 +274,12 @@ public final class com.xiaobai.livephotoutil.compat.NameHeuristics {
   public final java.lang.String stem(java.io.File);
   public final java.lang.String normalizedStem(java.io.File);
   public final int pairScore(java.io.File, java.io.File);
+}
+
+### com.xiaobai.livephotoutil.compat.NoopVideoCompatibilityNormalizer
+public final class com.xiaobai.livephotoutil.compat.NoopVideoCompatibilityNormalizer implements com.xiaobai.livephotoutil.compat.VideoCompatibilityNormalizer {
+  public static final com.xiaobai.livephotoutil.compat.NoopVideoCompatibilityNormalizer INSTANCE;
+  public com.xiaobai.livephotoutil.compat.MediaSlice normalize(com.xiaobai.livephotoutil.compat.MediaSlice, com.xiaobai.livephotoutil.compat.VideoContainerTarget, java.io.File);
 }
 
 ### com.xiaobai.livephotoutil.compat.PairCandidate
@@ -326,4 +353,18 @@ public final class com.xiaobai.livephotoutil.compat.VendorProfiles {
   public static final com.xiaobai.livephotoutil.compat.VendorProfiles INSTANCE;
   public final com.xiaobai.livephotoutil.compat.VendorProfile profileOf(com.xiaobai.livephotoutil.compat.DeviceVendor);
   public final java.util.List<com.xiaobai.livephotoutil.compat.VendorProfile> androidMotionProfiles();
+}
+
+### com.xiaobai.livephotoutil.compat.VideoCompatibilityNormalizer
+public interface com.xiaobai.livephotoutil.compat.VideoCompatibilityNormalizer {
+  public abstract com.xiaobai.livephotoutil.compat.MediaSlice normalize(com.xiaobai.livephotoutil.compat.MediaSlice, com.xiaobai.livephotoutil.compat.VideoContainerTarget, java.io.File);
+}
+
+### com.xiaobai.livephotoutil.compat.VideoContainerTarget
+public final class com.xiaobai.livephotoutil.compat.VideoContainerTarget extends java.lang.Enum<com.xiaobai.livephotoutil.compat.VideoContainerTarget> {
+  public static final com.xiaobai.livephotoutil.compat.VideoContainerTarget MP4;
+  public static final com.xiaobai.livephotoutil.compat.VideoContainerTarget QUICKTIME;
+  public static com.xiaobai.livephotoutil.compat.VideoContainerTarget[] values();
+  public static com.xiaobai.livephotoutil.compat.VideoContainerTarget valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<com.xiaobai.livephotoutil.compat.VideoContainerTarget> getEntries();
 }

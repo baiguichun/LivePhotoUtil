@@ -9,6 +9,7 @@
 - 原样回放：同厂商场景可优先直接回放原始文件（文件名、字节、修改时间保持一致）。
 - 严格校验：MotionPhoto 识别要求 XMP + `MicroVideoOffset` + `ftyp` 一致性。
 - 完整性保护：恢复前校验 canonical `image/video` 的 size + SHA-256。
+- 可选签名保护：支持 `manifestSignatureKeyId` + `HMAC-SHA256` + `keyRing` 轮换验签。
 - 协程接口：提供 `suspend` API，内部自动切换 `Dispatchers.IO`。
 - 协程取消：`CancellationException` 透传，不会被包装成业务异常。
 
@@ -41,7 +42,9 @@
 
 前提约束：
 
-- 跨厂商转码要求 `asset.video` 为 ISO BMFF（MP4/QuickTime）切片；若不是该容器，SDK 会拒绝转码。
+- 默认情况下，跨厂商转码要求 `asset.video` 为 ISO BMFF（MP4/QuickTime）切片；若不是该容器，SDK 会拒绝转码。
+- 若需更强兼容性（如 WebM/3GP 输入），可注入 `VideoCompatibilityNormalizer` 先做外部归一化，再交给 SDK 封装。
+- 默认 normalizer 可修复最多 8MB 头部垃圾字节导致的 `ftyp` 偏移；超出范围建议接入业务侧转码。
 - 本 SDK 对 Apple 的目标是“SDK 接入 App 内可识别回放”；若要求系统相册级导入，还需业务层补充 Apple 专用媒体元数据流程。
 
 ## 4. 云端中间格式规范
@@ -133,6 +136,7 @@ val result = sdk.restoreForDevice(
 - 校验 `rawFileCount` 与 `raw.*` 完整性。
 - 校验 `sha256` 与文件大小。
 - 拒绝路径穿越文件名（SDK 本地恢复也已防护）。
+- 对签名启用场景，建议服务端拒绝缺失 `manifestSignature*` 字段的包，和客户端 `signaturePolicy` 保持一致。
 
 ## 9. 生产使用建议
 
@@ -141,6 +145,7 @@ val result = sdk.restoreForDevice(
 - 对外暴露错误时建议映射成业务错误码（如：探测失败、清单损坏、校验失败、目标厂商不支持）。
 - 发布前至少执行：`./gradlew test lintDebug`。
 - 强烈建议将 SDK 输出目录与业务临时目录隔离，降低并发冲突概率。
+- 生产建议开启 `CloudCompatService` 默认策略 `REQUIRE_WHEN_KEY_CONFIGURED`，并配置 `manifestHmacKeyRing` 做密钥轮换。
 
 ## 10. 发布与版本治理
 

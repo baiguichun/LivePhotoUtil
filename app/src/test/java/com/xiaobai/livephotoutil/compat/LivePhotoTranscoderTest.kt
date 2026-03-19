@@ -78,6 +78,84 @@ class LivePhotoTranscoderTest {
     }
 
     @Test
+    fun transcodeToMotionPhoto_supportsLeadingBoxBeforeFtyp() {
+        val root = createTempDir("transcoder-test-leading-box")
+        try {
+            val result = LivePhotoTranscoder().transcode(
+                asset(
+                    root = root,
+                    vendor = DeviceVendor.APPLE,
+                    videoMime = "video/quicktime",
+                    videoBytes = isoBmffVideoWithLeadingFreeBox("qt  "),
+                    contentId = "sample_leading_box"
+                ),
+                targetVendor = DeviceVendor.OPPO,
+                outputDir = File(root, "out")
+            )
+            val motion = result.outputFiles.single()
+            val offset = MediaIO.findEmbeddedMp4Offset(motion)
+            assertTrue(offset > 0L)
+            val normalizedBrand = readAscii(motion, offset + 8, 4)
+            assertEquals("isom", normalizedBrand)
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun transcodeToMotionPhoto_defaultNormalizerRepairsPrefixedJunkIsoVideo() {
+        val root = createTempDir("transcoder-test-default-normalizer")
+        try {
+            val junkPrefixed = byteArrayOf(0x7A, 0x01, 0x02, 0x03) + isoBmffVideo("isom")
+            val result = LivePhotoTranscoder().transcode(
+                asset(
+                    root = root,
+                    vendor = DeviceVendor.UNKNOWN,
+                    videoMime = "video/unknown",
+                    videoBytes = junkPrefixed,
+                    contentId = "sample_default_normalizer"
+                ),
+                targetVendor = DeviceVendor.GOOGLE,
+                outputDir = File(root, "out")
+            )
+            val motion = result.outputFiles.single()
+            val offset = MediaIO.findEmbeddedMp4Offset(motion)
+            assertTrue(offset > 0L)
+            assertEquals("isom", readAscii(motion, offset + 8, 4))
+            assertEquals(offset, extractMicroVideoOffset(motion))
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun transcodeToMotionPhoto_defaultNormalizerRepairsLargePrefixJunkIsoVideo() {
+        val root = createTempDir("transcoder-test-default-normalizer-large-prefix")
+        try {
+            val largePrefix = ByteArray(2 * 1024 * 1024) { 0x55.toByte() }
+            val junkPrefixed = largePrefix + isoBmffVideo("isom")
+            val result = LivePhotoTranscoder().transcode(
+                asset(
+                    root = root,
+                    vendor = DeviceVendor.UNKNOWN,
+                    videoMime = "video/unknown",
+                    videoBytes = junkPrefixed,
+                    contentId = "sample_default_normalizer_large_prefix"
+                ),
+                targetVendor = DeviceVendor.GOOGLE,
+                outputDir = File(root, "out")
+            )
+            val motion = result.outputFiles.single()
+            val offset = MediaIO.findEmbeddedMp4Offset(motion)
+            assertTrue(offset > 0L)
+            assertEquals("isom", readAscii(motion, offset + 8, 4))
+            assertEquals(offset, extractMicroVideoOffset(motion))
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
     fun transcodeToMotionPhoto_rejectsNonIsoBmffVideo() {
         val root = createTempDir("transcoder-test-non-iso")
         try {
@@ -96,6 +174,75 @@ class LivePhotoTranscoderTest {
                 fail("Expected transcode to reject non-ISO BMFF video.")
             } catch (expected: IllegalArgumentException) {
                 assertTrue(expected.message?.contains("ISO BMFF", ignoreCase = true) == true)
+            }
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun transcodeToMotionPhoto_usesVideoNormalizerForNonIsoInput() {
+        val root = createTempDir("transcoder-test-normalizer")
+        try {
+            val normalizer = object : VideoCompatibilityNormalizer {
+                override fun normalize(
+                    source: MediaSlice,
+                    targetContainer: VideoContainerTarget,
+                    workingDir: File
+                ): MediaSlice? {
+                    val output = File(workingDir, "normalized.mp4")
+                    output.writeBytes(isoBmffVideo("isom"))
+                    return MediaSlice(output, 0L, output.length(), "video/mp4")
+                }
+            }
+            val result = LivePhotoTranscoder(videoNormalizer = normalizer).transcode(
+                asset(
+                    root = root,
+                    vendor = DeviceVendor.UNKNOWN,
+                    videoMime = "video/unknown",
+                    videoBytes = byteArrayOf(0x12, 0x34, 0x56, 0x78),
+                    contentId = "sample_normalized"
+                ),
+                targetVendor = DeviceVendor.XIAOMI,
+                outputDir = File(root, "out")
+            )
+
+            val motion = result.outputFiles.single()
+            val offset = MediaIO.findEmbeddedMp4Offset(motion)
+            assertTrue(offset > 0L)
+            assertEquals("isom", readAscii(motion, offset + 8, 4))
+            assertEquals(offset, extractMicroVideoOffset(motion))
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun transcodeToMotionPhoto_rejectsWhenNormalizerCannotHandleInput() {
+        val root = createTempDir("transcoder-test-normalizer-null")
+        try {
+            val normalizer = object : VideoCompatibilityNormalizer {
+                override fun normalize(
+                    source: MediaSlice,
+                    targetContainer: VideoContainerTarget,
+                    workingDir: File
+                ): MediaSlice? = null
+            }
+            try {
+                LivePhotoTranscoder(videoNormalizer = normalizer).transcode(
+                    asset(
+                        root = root,
+                        vendor = DeviceVendor.UNKNOWN,
+                        videoMime = "video/unknown",
+                        videoBytes = byteArrayOf(0x12, 0x34, 0x56, 0x78),
+                        contentId = "sample_normalizer_null"
+                    ),
+                    targetVendor = DeviceVendor.GOOGLE,
+                    outputDir = File(root, "out")
+                )
+                fail("Expected transcode to reject when normalizer returns null.")
+            } catch (expected: LivePhotoSdkException) {
+                assertEquals(LivePhotoErrorCode.UNSUPPORTED_TRANSCODE_TARGET, expected.code)
             }
         } finally {
             deleteRecursively(root)
@@ -175,6 +322,19 @@ class LivePhotoTranscoderTest {
     }
 
     /**
+     * 生成带前置 `free` box 的 ISO BMFF 样本。
+     *
+     * @param majorBrand `ftyp` 主品牌（4 字符）。
+     */
+    private fun isoBmffVideoWithLeadingFreeBox(majorBrand: String): ByteArray {
+        val freeBox = byteArrayOf(
+            0x00, 0x00, 0x00, 0x08,
+            'f'.code.toByte(), 'r'.code.toByte(), 'e'.code.toByte(), 'e'.code.toByte()
+        )
+        return freeBox + isoBmffVideo(majorBrand)
+    }
+
+    /**
      * 从文件指定偏移读取 ASCII 字符串。
      *
      * @param file 源文件。
@@ -184,6 +344,18 @@ class LivePhotoTranscoderTest {
     private fun readAscii(file: File, offset: Long, length: Int): String {
         val bytes = file.readBytes().copyOfRange(offset.toInt(), offset.toInt() + length)
         return String(bytes, Charsets.US_ASCII)
+    }
+
+    /**
+     * 从 JPEG XMP 中提取 `GCamera:MicroVideoOffset` 值。
+     *
+     * @param file MotionPhoto JPEG 文件。
+     */
+    private fun extractMicroVideoOffset(file: File): Long {
+        val text = String(file.readBytes(), Charsets.ISO_8859_1)
+        val match = Regex("GCamera:MicroVideoOffset=\"(\\d+)\"").find(text)
+            ?: error("MotionPhoto XMP missing GCamera:MicroVideoOffset")
+        return match.groupValues[1].toLong()
     }
 
     /**

@@ -5,18 +5,49 @@ import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.LinkedHashMap
 import java.util.Properties
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.CancellationException
 
 /**
  * 云端兼容服务：统一上传格式并按目标设备恢复。
  *
  * @property transcoder 底层转码器实例。
+ * @property manifestHmacKey 可选 manifest HMAC-SHA256 签名密钥（同时作为默认验签密钥）。
+ * @property manifestHmacKeyId 默认签名密钥标识（写入 manifest，用于密钥轮换）。
+ * @property manifestHmacKeyRing 可选验签密钥集合（`keyId -> keyBytes`）。
+ * @property signaturePolicy manifest 签名校验策略。
  */
-class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhotoTranscoder()) {
+class CloudCompatService(
+    private val transcoder: LivePhotoTranscoder = LivePhotoTranscoder(),
+    manifestHmacKey: ByteArray? = null,
+    private val manifestHmacKeyId: String = "default",
+    manifestHmacKeyRing: Map<String, ByteArray> = emptyMap(),
+    private val signaturePolicy: ManifestSignaturePolicy = ManifestSignaturePolicy.REQUIRE_WHEN_KEY_CONFIGURED
+) {
     /** 原始文件名清洗正则。 */
     private val safeNameRegex = Regex("[^a-zA-Z0-9._-]")
     /** 文件复制与摘要计算使用的缓冲区大小。 */
     private val ioBufferSize = 8192
+    /** Manifest 签名算法字段键名。 */
+    private val manifestSignatureAlgoKey = "manifestSignatureAlgo"
+    /** Manifest 签名值字段键名。 */
+    private val manifestSignatureKey = "manifestSignature"
+    /** Manifest 签名 keyId 字段键名。 */
+    private val manifestSignatureKeyIdKey = "manifestSignatureKeyId"
+    /** Manifest 签名算法常量。 */
+    private val manifestSignatureAlgo = "HMAC-SHA256"
+    /** Manifest HMAC 密钥拷贝，避免外部修改原数组造成行为漂移。 */
+    private val manifestHmacKey = manifestHmacKey?.copyOf()
+    /** Manifest HMAC 验签密钥集合拷贝（keyId -> keyBytes）。 */
+    private val manifestHmacKeyRing = manifestHmacKeyRing.mapValues { (_, value) -> value.copyOf() }
+
+    init {
+        require(manifestHmacKeyId.isNotBlank()) { "manifestHmacKeyId cannot be blank." }
+        manifestHmacKeyRing.keys.forEach { keyId ->
+            require(keyId.isNotBlank()) { "manifestHmacKeyRing contains blank keyId." }
+        }
+    }
 
     /**
      * 将任意协议资产归一化为云端中间格式。
@@ -60,6 +91,7 @@ class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhoto
                     properties["raw.$index.lastModified"] = source.lastModified().toString()
                     properties["raw.$index.sha256"] = sha256(target)
                 }
+                attachManifestSignature(properties)
 
                 MediaIO.writeToFileAtomic(manifestFile) { out ->
                     properties.store(out, "LivePhoto canonical package")
@@ -106,6 +138,7 @@ class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhoto
                 require(manifest.exists()) { "Missing canonical manifest: $manifest" }
                 val props = Properties()
                 FileInputStream(manifest).use { props.load(it) }
+                verifyManifestSignature(props)
 
                 if (preferRawReplay) {
                     val rawReplay = try {
@@ -155,6 +188,7 @@ class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhoto
                 require(manifest.exists()) { "Missing canonical manifest: $manifest" }
                 val props = Properties()
                 FileInputStream(manifest).use { props.load(it) }
+                verifyManifestSignature(props)
                 restoreRawFiles(props, canonicalDir, outputDir)
             }
         } catch (cancelled: CancellationException) {
@@ -286,6 +320,113 @@ class CloudCompatService(private val transcoder: LivePhotoTranscoder = LivePhoto
      */
     private fun requireProperty(props: Properties, key: String): String {
         return props.getProperty(key) ?: error("Missing required manifest key: $key")
+    }
+
+    /**
+     * 在 manifest 中附加签名字段（若配置了 [manifestHmacKey]）。
+     *
+     * @param props manifest 属性集合。
+     */
+    private fun attachManifestSignature(props: Properties) {
+        val key = manifestHmacKey ?: return
+        props[manifestSignatureAlgoKey] = manifestSignatureAlgo
+        props[manifestSignatureKeyIdKey] = manifestHmacKeyId
+        props[manifestSignatureKey] = computeManifestHmac(props, key)
+    }
+
+    /**
+     * 验证 manifest 签名（若 manifest 中包含签名字段）。
+     *
+     * @param props manifest 属性集合。
+     */
+    private fun verifyManifestSignature(props: Properties) {
+        val signature = props.getProperty(manifestSignatureKey)?.trim().orEmpty()
+        if (signature.isBlank()) {
+            enforceSignaturePresenceIfRequired()
+            return
+        }
+        val algo = props.getProperty(manifestSignatureAlgoKey, manifestSignatureAlgo)
+        require(algo == manifestSignatureAlgo) { "Unsupported manifest signature algorithm: $algo" }
+        val keyId = props.getProperty(manifestSignatureKeyIdKey)?.trim().orEmpty()
+        val key = resolveVerificationKey(keyId)
+            ?: if (keyId.isBlank()) {
+                error("Manifest signature is present but verification key is ambiguous or not configured.")
+            } else {
+                error("Manifest signature is present but verification key is not configured for keyId: $keyId.")
+            }
+        val expected = computeManifestHmac(props, key)
+        require(constantTimeEquals(signature, expected)) { "Manifest signature mismatch." }
+    }
+
+    /**
+     * 按策略判断无签名 manifest 是否允许通过。
+     */
+    private fun enforceSignaturePresenceIfRequired() {
+        when (signaturePolicy) {
+            ManifestSignaturePolicy.OPTIONAL -> return
+            ManifestSignaturePolicy.REQUIRED -> error("Manifest signature is required but missing.")
+            ManifestSignaturePolicy.REQUIRE_WHEN_KEY_CONFIGURED -> {
+                if (manifestHmacKey != null || manifestHmacKeyRing.isNotEmpty()) {
+                    error("Manifest signature is required when verification keys are configured.")
+                }
+            }
+        }
+    }
+
+    /**
+     * 按 keyId 解析用于验签的密钥。
+     *
+     * @param keyId manifest 中声明的签名密钥标识（允许为空，表示旧清单格式）。
+     */
+    private fun resolveVerificationKey(keyId: String): ByteArray? {
+        if (keyId.isNotBlank()) {
+            val fromRing = manifestHmacKeyRing[keyId]
+            if (fromRing != null) return fromRing
+            if (manifestHmacKey != null && keyId == manifestHmacKeyId) return manifestHmacKey
+            return null
+        }
+        if (manifestHmacKey != null) return manifestHmacKey
+        return if (manifestHmacKeyRing.size == 1) manifestHmacKeyRing.values.first() else null
+    }
+
+    /**
+     * 计算 manifest HMAC-SHA256。
+     *
+     * @param props manifest 属性集合。
+     * @param key HMAC 密钥字节。
+     */
+    private fun computeManifestHmac(props: Properties, key: ByteArray): String {
+        val canonical = canonicalizeManifest(props)
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key, "HmacSHA256"))
+        return toHex(mac.doFinal(canonical.toByteArray(Charsets.UTF_8)))
+    }
+
+    /**
+     * 将 manifest 属性规范化为可签名文本（按 key 排序）。
+     *
+     * @param props manifest 属性集合。
+     */
+    private fun canonicalizeManifest(props: Properties): String {
+        val keys = props.stringPropertyNames()
+            .filterNot { key -> key == manifestSignatureAlgoKey || key == manifestSignatureKey }
+            .sorted()
+        return keys.joinToString("\n") { key -> "$key=${props.getProperty(key, "")}" }
+    }
+
+    /**
+     * 常量时间比较两个十六进制摘要字符串。
+     *
+     * @param a 摘要 A。
+     * @param b 摘要 B。
+     */
+    private fun constantTimeEquals(a: String, b: String): Boolean {
+        if (a.length != b.length) return false
+        var diff = 0
+        for (index in a.indices) {
+            diff = diff or (a[index].code xor b[index].code)
+        }
+        return diff == 0
     }
 
     /**

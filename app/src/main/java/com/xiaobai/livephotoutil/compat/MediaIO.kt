@@ -14,6 +14,8 @@ object MediaIO {
     private const val IO_BUFFER_SIZE = 8192
     /** ISO BMFF `ftyp` box 最小合法长度。 */
     private const val MIN_FTYP_BOX_SIZE = 16L
+    /** 查找 `ftyp` 时允许扫描的最大头部范围（字节）。 */
+    private const val MAX_FTYP_SEARCH_BYTES = 1024L * 1024L
     /** ISO BMFF `ftyp` box 类型标识。 */
     private val FTYP_TYPE = byteArrayOf('f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte())
     /** 标准 MP4 目标主品牌（major brand）。 */
@@ -160,6 +162,136 @@ object MediaIO {
     }
 
     /**
+     * 估算“移除旧 Motion 元数据并注入 XMP”后的 JPEG 字节长度。
+     *
+     * @param slice 输入 JPEG 切片。
+     * @param xmpXml 待注入的 XMP 文本。
+     */
+    fun estimateJpegWithoutMotionMetadataAndInjectedXmpSize(slice: MediaSlice, xmpXml: String): Long {
+        val counter = CountingOutputStream()
+        copyJpegWithoutMotionMetadataAndInjectXmp(slice, xmpXml, counter)
+        return counter.count
+    }
+
+    /**
+     * 以流式方式输出“移除旧 Motion 元数据并注入 XMP”后的 JPEG。
+     *
+     * 该方法不会把整张图片读入内存，适合大图生产场景。
+     *
+     * @param slice 输入 JPEG 切片。
+     * @param xmpXml 待注入的 XMP 文本。
+     * @param out 输出流。
+     */
+    fun copyJpegWithoutMotionMetadataAndInjectXmp(slice: MediaSlice, xmpXml: String, out: OutputStream): Long {
+        validateSliceBounds(slice)
+        val xmpSegment = buildXmpApp1Segment(xmpXml)
+        RandomAccessFile(slice.sourceFile, "r").use { raf ->
+            raf.seek(slice.offset)
+            var remaining = slice.length
+            require(remaining >= 2L) { "JPEG slice is too small: ${slice.sourceFile}" }
+            val soi0 = raf.read()
+            val soi1 = raf.read()
+            require(soi0 == 0xFF && soi1 == 0xD8) { "JPEG slice does not start with SOI marker: ${slice.sourceFile}" }
+            remaining -= 2L
+
+            var written = 0L
+            out.write(soi0)
+            out.write(soi1)
+            out.write(xmpSegment)
+            written += 2L + xmpSegment.size
+
+            while (remaining > 0L) {
+                val first = raf.read()
+                require(first >= 0) { "Unexpected EOF while parsing JPEG stream." }
+                remaining -= 1L
+                if (first != 0xFF) {
+                    out.write(first)
+                    written += 1L
+                    written += copyRange(raf, raf.filePointer, remaining, out)
+                    return written
+                }
+
+                if (remaining <= 0L) {
+                    out.write(0xFF)
+                    written += 1L
+                    return written
+                }
+
+                var marker = raf.read()
+                require(marker >= 0) { "Unexpected EOF while reading JPEG marker." }
+                remaining -= 1L
+                while (marker == 0xFF && remaining > 0L) {
+                    marker = raf.read()
+                    require(marker >= 0) { "Unexpected EOF while reading JPEG marker fill bytes." }
+                    remaining -= 1L
+                }
+                if (marker == 0x00) {
+                    out.write(0xFF)
+                    out.write(0x00)
+                    written += 2L
+                    continue
+                }
+
+                if (marker == 0xD9) {
+                    out.write(0xFF)
+                    out.write(0xD9)
+                    written += 2L
+                    return written
+                }
+
+                if (marker in 0xD0..0xD7 || marker == 0x01) {
+                    out.write(0xFF)
+                    out.write(marker)
+                    written += 2L
+                    continue
+                }
+
+                require(remaining >= 2L) { "Invalid JPEG segment length header: ${slice.sourceFile}" }
+                val lenHi = raf.read()
+                val lenLo = raf.read()
+                require(lenHi >= 0 && lenLo >= 0) { "Unexpected EOF while reading JPEG segment length." }
+                remaining -= 2L
+                val segmentLength = (lenHi shl 8) or lenLo
+                require(segmentLength >= 2) { "Invalid JPEG segment length: $segmentLength" }
+                val payloadLength = segmentLength - 2
+                require(payloadLength.toLong() <= remaining) { "JPEG segment exceeds remaining slice bytes." }
+                val payload = ByteArray(payloadLength)
+                var payloadOffset = 0
+                while (payloadOffset < payloadLength) {
+                    val read = raf.read(payload, payloadOffset, payloadLength - payloadOffset)
+                    require(read > 0) { "Unexpected EOF while reading JPEG segment payload." }
+                    payloadOffset += read
+                }
+                remaining -= payloadLength.toLong()
+
+                if (marker == 0xDA) {
+                    out.write(0xFF)
+                    out.write(marker)
+                    out.write(lenHi)
+                    out.write(lenLo)
+                    out.write(payload)
+                    written += (4 + payloadLength).toLong()
+                    if (remaining > 0L) {
+                        written += copyRange(raf, raf.filePointer, remaining, out)
+                    }
+                    return written
+                }
+
+                val drop = (marker == 0xE1 || marker == 0xFE) && containsMotionKeywords(payload)
+                if (!drop) {
+                    out.write(0xFF)
+                    out.write(marker)
+                    out.write(lenHi)
+                    out.write(lenLo)
+                    out.write(payload)
+                    written += (4 + payloadLength).toLong()
+                }
+            }
+            return written
+        }
+    }
+
+    /**
      * 以 MP4 兼容容器形式写出视频切片。
      *
      * 若输入为 ISO BMFF/QuickTime，则通过重写 `ftyp` 主品牌与兼容品牌输出 MP4 兼容流；
@@ -259,6 +391,18 @@ object MediaIO {
     }
 
     /**
+     * 判断切片是否可视为 ISO BMFF 容器（允许 `ftyp` 前存在合法前置 box）。
+     *
+     * @param slice 待判断的视频切片。
+     */
+    internal fun isIsoBmffSlice(slice: MediaSlice): Boolean {
+        validateSliceBounds(slice)
+        return RandomAccessFile(slice.sourceFile, "r").use { raf ->
+            runCatching { locateFtypBox(raf, slice.offset, slice.length) }.isSuccess
+        }
+    }
+
+    /**
      * 读取文件前缀字节，最多 [maxBytes]。
      *
      * @param file 输入文件。
@@ -316,26 +460,19 @@ object MediaIO {
     ) {
         validateSliceBounds(slice)
         RandomAccessFile(slice.sourceFile, "r").use { raf ->
-            val header = ByteArray(12)
-            raf.seek(slice.offset)
-            val headerRead = raf.read(header)
-            require(headerRead == header.size) { "Video slice is too small for ISO BMFF header: ${slice.sourceFile}" }
-            require(
-                header[4] == FTYP_TYPE[0]
-                    && header[5] == FTYP_TYPE[1]
-                    && header[6] == FTYP_TYPE[2]
-                    && header[7] == FTYP_TYPE[3]
-            ) {
-                "Video slice must start with ISO BMFF ftyp box for cross-vendor transcode: ${slice.sourceFile}"
-            }
-
-            val ftypSize = readUInt32(header, 0)
+            val ftypPosition = locateFtypBox(raf, slice.offset, slice.length)
+            val ftypOffset = slice.offset + ftypPosition.relativeOffset
+            val ftypSize = ftypPosition.size
             require(ftypSize >= MIN_FTYP_BOX_SIZE) { "Invalid ftyp size in video slice: $ftypSize" }
             require(ftypSize <= slice.length) { "ftyp size exceeds slice length: ${slice.sourceFile}" }
             require(ftypSize <= Int.MAX_VALUE.toLong()) { "ftyp box is too large to normalize: $ftypSize" }
 
+            if (ftypPosition.relativeOffset > 0L) {
+                copyRange(raf, slice.offset, ftypPosition.relativeOffset, out)
+            }
+
             val ftypBox = ByteArray(ftypSize.toInt())
-            raf.seek(slice.offset)
+            raf.seek(ftypOffset)
             var readOffset = 0
             while (readOffset < ftypBox.size) {
                 val read = raf.read(ftypBox, readOffset, ftypBox.size - readOffset)
@@ -345,12 +482,67 @@ object MediaIO {
             patchFtypBrands(ftypBox, targetMajorBrand, requiredCompatibleBrands)
             out.write(ftypBox)
 
-            val remainingOffset = slice.offset + ftypSize
-            val remainingLength = slice.length - ftypSize
+            val remainingOffset = ftypOffset + ftypSize
+            val remainingLength = slice.offset + slice.length - remainingOffset
             if (remainingLength > 0L) {
                 copyRange(raf, remainingOffset, remainingLength, out)
             }
         }
+    }
+
+    /**
+     * `ftyp` box 在切片中的位置信息。
+     *
+     * @property relativeOffset 相对于切片起点的偏移。
+     * @property size `ftyp` box 大小（字节）。
+     */
+    private data class FtypPosition(
+        val relativeOffset: Long,
+        val size: Long
+    )
+
+    /**
+     * 在切片头部扫描并定位 `ftyp` box。
+     *
+     * 兼容前置 box（例如 `free`）场景，不要求 `ftyp` 必须位于偏移 0。
+     *
+     * @param raf 源文件随机读取对象。
+     * @param sliceOffset 切片起始偏移。
+     * @param sliceLength 切片总长度。
+     */
+    private fun locateFtypBox(raf: RandomAccessFile, sliceOffset: Long, sliceLength: Long): FtypPosition {
+        val searchLimit = minOf(sliceLength, MAX_FTYP_SEARCH_BYTES)
+        var cursor = 0L
+        val header = ByteArray(8)
+        while (cursor + 8 <= searchLimit) {
+            raf.seek(sliceOffset + cursor)
+            val readHeader = raf.read(header)
+            if (readHeader != header.size) break
+
+            val isFtyp = header[4] == FTYP_TYPE[0]
+                && header[5] == FTYP_TYPE[1]
+                && header[6] == FTYP_TYPE[2]
+                && header[7] == FTYP_TYPE[3]
+
+            var boxSize = readUInt32(header, 0)
+            if (boxSize == 1L) {
+                if (cursor + 16 > sliceLength) break
+                val largeSize = ByteArray(8)
+                val readLarge = raf.read(largeSize)
+                if (readLarge != largeSize.size) break
+                boxSize = readUInt64(largeSize, 0)
+            } else if (boxSize == 0L) {
+                boxSize = sliceLength - cursor
+            }
+
+            if (boxSize < 8L) break
+            if (cursor + boxSize > sliceLength) break
+            if (isFtyp) return FtypPosition(relativeOffset = cursor, size = boxSize)
+            cursor += boxSize
+        }
+        throw IllegalArgumentException(
+            "Cannot locate ISO BMFF ftyp box near stream head for cross-vendor transcode: $sliceOffset/$sliceLength"
+        )
     }
 
     /**
@@ -390,6 +582,24 @@ object MediaIO {
     }
 
     /**
+     * 读取 64 位无符号大端整数（限制为 `Long` 可表示范围）。
+     *
+     * @param bytes 输入字节数组。
+     * @param offset 读取起始偏移。
+     */
+    private fun readUInt64(bytes: ByteArray, offset: Int): Long {
+        require((bytes[offset].toInt() and 0x80) == 0) { "Unsigned 64-bit value exceeds Long range." }
+        return ((bytes[offset].toLong() and 0xFFL) shl 56) or
+            ((bytes[offset + 1].toLong() and 0xFFL) shl 48) or
+            ((bytes[offset + 2].toLong() and 0xFFL) shl 40) or
+            ((bytes[offset + 3].toLong() and 0xFFL) shl 32) or
+            ((bytes[offset + 4].toLong() and 0xFFL) shl 24) or
+            ((bytes[offset + 5].toLong() and 0xFFL) shl 16) or
+            ((bytes[offset + 6].toLong() and 0xFFL) shl 8) or
+            (bytes[offset + 7].toLong() and 0xFFL)
+    }
+
+    /**
      * 复制源文件指定范围到输出流。
      *
      * @param raf 源文件随机读取对象。
@@ -397,9 +607,10 @@ object MediaIO {
      * @param length 复制长度。
      * @param out 输出流。
      */
-    private fun copyRange(raf: RandomAccessFile, offset: Long, length: Long, out: OutputStream) {
+    private fun copyRange(raf: RandomAccessFile, offset: Long, length: Long, out: OutputStream): Long {
         raf.seek(offset)
         var remaining = length
+        var copied = 0L
         val buffer = ByteArray(IO_BUFFER_SIZE)
         while (remaining > 0) {
             val toRead = minOf(buffer.size.toLong(), remaining).toInt()
@@ -407,6 +618,83 @@ object MediaIO {
             require(read > 0) { "Unexpected EOF while copying media range." }
             out.write(buffer, 0, read)
             remaining -= read
+            copied += read.toLong()
+        }
+        return copied
+    }
+
+    /**
+     * 构造 JPEG APP1 XMP 段字节。
+     *
+     * @param xmpXml XMP 文本。
+     */
+    private fun buildXmpApp1Segment(xmpXml: String): ByteArray {
+        val header = "http://ns.adobe.com/xap/1.0/\u0000".toByteArray(StandardCharsets.US_ASCII)
+        val xmp = xmpXml.toByteArray(StandardCharsets.UTF_8)
+        val payload = ByteArray(header.size + xmp.size)
+        System.arraycopy(header, 0, payload, 0, header.size)
+        System.arraycopy(xmp, 0, payload, header.size, xmp.size)
+        val segmentLength = payload.size + 2
+        require(segmentLength <= 0xFFFF) { "XMP payload too large for single JPEG APP1 segment." }
+        val segment = ByteArray(payload.size + 4)
+        segment[0] = 0xFF.toByte()
+        segment[1] = 0xE1.toByte()
+        segment[2] = ((segmentLength shr 8) and 0xFF).toByte()
+        segment[3] = (segmentLength and 0xFF).toByte()
+        System.arraycopy(payload, 0, segment, 4, payload.size)
+        return segment
+    }
+
+    /**
+     * 判断 JPEG 段载荷中是否含 MotionPhoto 相关关键词。
+     *
+     * @param payload 段载荷字节。
+     */
+    private fun containsMotionKeywords(payload: ByteArray): Boolean {
+        if (payload.isEmpty()) return false
+        val text = String(payload, StandardCharsets.ISO_8859_1)
+        val keys = listOf(
+            "MotionPhoto",
+            "MicroVideo",
+            "GCamera:",
+            "HwCamera:",
+            "HUAWEI:",
+            "vivo:",
+            "VIVO:",
+            "OPPO:",
+            "Oplus:",
+            "MiCamera:",
+            "Xiaomi:"
+        )
+        return keys.any { key -> text.contains(key) }
+    }
+
+    /**
+     * 只计数字节数的输出流。
+     */
+    private class CountingOutputStream : OutputStream() {
+        /** 已写入字节数。 */
+        var count: Long = 0L
+            private set
+
+        /**
+         * 统计单字节写入。
+         *
+         * @param b 写入字节。
+         */
+        override fun write(b: Int) {
+            count += 1L
+        }
+
+        /**
+         * 统计数组写入。
+         *
+         * @param b 字节数组。
+         * @param off 起始偏移。
+         * @param len 写入长度。
+         */
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            if (len > 0) count += len.toLong()
         }
     }
 

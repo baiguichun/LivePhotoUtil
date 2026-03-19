@@ -47,12 +47,21 @@ object LivePhotoErrorMapper {
             throwable is FileNotFoundException || throwable is IOException -> LivePhotoErrorCode.FILE_IO_ERROR
             lower.contains("cannot detect supported livephoto") -> LivePhotoErrorCode.DETECTION_FAILED
             lower.contains("unsupported vendor profile") -> LivePhotoErrorCode.UNSUPPORTED_VENDOR
-            lower.contains("requires jpeg image") -> LivePhotoErrorCode.UNSUPPORTED_TRANSCODE_TARGET
+            lower.contains("requires jpeg image")
+                || lower.contains("iso bmff")
+                || lower.contains("normalizer output")
+                || lower.contains("no normalizer output") -> LivePhotoErrorCode.UNSUPPORTED_TRANSCODE_TARGET
             lower.contains("raw output path escapes") || lower.contains("cannot contain '/'") || lower.contains("cannot contain '\\'") ->
                 LivePhotoErrorCode.OUTPUT_PATH_INVALID
             lower.contains("missing canonical manifest") -> LivePhotoErrorCode.CANONICAL_MANIFEST_MISSING
             lower.contains("canonical media files are missing") -> LivePhotoErrorCode.CANONICAL_PAYLOAD_MISSING
-            lower.contains("checksum mismatch") || lower.contains("size mismatch") -> LivePhotoErrorCode.INTEGRITY_CHECK_FAILED
+            lower.contains("checksum mismatch")
+                || lower.contains("size mismatch")
+                || lower.contains("manifest signature mismatch")
+                || lower.contains("manifest signature is present")
+                || lower.contains("unsupported manifest signature algorithm")
+                || lower.contains("manifest signature is required")
+                || lower.contains("verification key is ambiguous") -> LivePhotoErrorCode.INTEGRITY_CHECK_FAILED
             lower.contains("raw replay") || lower.contains("raw directory is missing") || lower.contains("raw file") ->
                 LivePhotoErrorCode.RAW_REPLAY_UNAVAILABLE
             lower.contains("targetvendor cannot be unknown") || lower.contains("invalid file") || lower.contains("candidates cannot be empty") ->

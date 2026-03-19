@@ -34,8 +34,9 @@ suspend fun transcode(
 
 - 用途：把统一资产转为目标厂商格式。
 - 约束：
-  - 目标 Android MotionPhoto 时，`asset.video` 必须是 ISO BMFF（MP4/QuickTime）切片。
+  - 默认情况下，目标 Android MotionPhoto 时，`asset.video` 必须是 ISO BMFF（MP4/QuickTime）切片。
   - 目标 Apple 时，SDK 输出 `.mov`，并生成 sidecar 属性文件。
+  - 可通过 `VideoCompatibilityNormalizer` 为非 ISO BMFF 输入提供归一化能力。
 
 ### 1.4 `detectAndTranscode`
 
@@ -117,6 +118,46 @@ suspend fun restoreOriginal(canonicalDir: File, outputDir: File): List<File>
 
 - `dir`：canonical 目录。
 - `imageFile` / `videoFile` / `manifestFile` / `rawDir`：核心路径。
+
+### 2.5 `VideoCompatibilityNormalizer`
+
+- 用途：为非 ISO BMFF 输入提供外部归一化扩展点。
+- 方法：
+
+```kotlin
+fun normalize(
+    source: MediaSlice,
+    targetContainer: VideoContainerTarget,
+    workingDir: File
+): MediaSlice?
+```
+
+- 返回 `null` 表示当前 normalizer 无法处理该输入。
+- 目标容器类型：`VideoContainerTarget.MP4` / `VideoContainerTarget.QUICKTIME`。
+- 默认实现 `DefaultVideoCompatibilityNormalizer` 会尝试修复最多 8MB 头部垃圾字节导致的 `ftyp` 偏移。
+
+### 2.6 `CloudCompatService`（签名配置）
+
+```kotlin
+class CloudCompatService(
+    transcoder: LivePhotoTranscoder = LivePhotoTranscoder(),
+    manifestHmacKey: ByteArray? = null,
+    manifestHmacKeyId: String = "default",
+    manifestHmacKeyRing: Map<String, ByteArray> = emptyMap(),
+    signaturePolicy: ManifestSignaturePolicy = ManifestSignaturePolicy.REQUIRE_WHEN_KEY_CONFIGURED
+)
+```
+
+- `manifestHmacKey`：用于写入签名，也可作为默认验签密钥。
+- `manifestHmacKeyId`：写入 manifest 的签名密钥标识。
+- `manifestHmacKeyRing`：验签密钥集合（支持密钥轮换）。
+- `signaturePolicy`：无签名 manifest 的校验策略。
+
+### 2.7 `ManifestSignaturePolicy`
+
+- `OPTIONAL`：签名可选（兼容历史无签名包）。
+- `REQUIRE_WHEN_KEY_CONFIGURED`：配置任意 key 后要求签名（默认，防降级）。
+- `REQUIRED`：始终要求签名。
 
 ## 3. 异常语义
 

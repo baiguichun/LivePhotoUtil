@@ -123,6 +123,171 @@ class CloudCompatServiceTest {
     }
 
     @Test
+    fun normalizeForCloud_writesManifestSignatureWhenKeyConfigured() {
+        val root = createTempDir("cloud-signature-write")
+        try {
+            val key = "livephoto-test-key".toByteArray(Charsets.UTF_8)
+            val canonical = createAppleCanonical(root, "IMG_0701", key)
+            val props = Properties()
+            FileInputStream(canonical.manifestFile).use { props.load(it) }
+            assertTrue(props.getProperty("manifestSignatureAlgo") == "HMAC-SHA256")
+            assertTrue((props.getProperty("manifestSignature") ?: "").isNotBlank())
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun restoreForDevice_rejectsTamperedSignedManifest() {
+        val root = createTempDir("cloud-signature-tamper")
+        try {
+            val key = "livephoto-test-key".toByteArray(Charsets.UTF_8)
+            val canonical = createAppleCanonical(root, "IMG_0801", key)
+            mutateManifest(canonical.manifestFile) { props ->
+                props["contentId"] = "tampered_content"
+            }
+            try {
+                CloudCompatService(manifestHmacKey = key).restoreForDevice(
+                    canonicalDir = canonical.dir,
+                    targetVendor = DeviceVendor.APPLE,
+                    outputDir = File(root, "restore"),
+                    preferRawReplay = false
+                )
+                fail("Expected restoreForDevice to reject tampered signed manifest.")
+            } catch (expected: LivePhotoSdkException) {
+                assertEquals(LivePhotoErrorCode.INTEGRITY_CHECK_FAILED, expected.code)
+                assertTrue(expected.message?.contains("signature", ignoreCase = true) == true)
+            }
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun restoreForDevice_rejectsSignedManifestWhenVerificationKeyMissing() {
+        val root = createTempDir("cloud-signature-missing-key")
+        try {
+            val key = "livephoto-test-key".toByteArray(Charsets.UTF_8)
+            val canonical = createAppleCanonical(root, "IMG_0901", key)
+            try {
+                CloudCompatService().restoreForDevice(
+                    canonicalDir = canonical.dir,
+                    targetVendor = DeviceVendor.APPLE,
+                    outputDir = File(root, "restore"),
+                    preferRawReplay = false
+                )
+                fail("Expected restoreForDevice to reject signed manifest without verification key.")
+            } catch (expected: LivePhotoSdkException) {
+                assertEquals(LivePhotoErrorCode.INTEGRITY_CHECK_FAILED, expected.code)
+            }
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun normalizeForCloud_copiesManifestHmacKeyDefensively() {
+        val root = createTempDir("cloud-signature-defensive-copy")
+        try {
+            val key = "livephoto-test-key".toByteArray(Charsets.UTF_8)
+            val keySnapshot = key.copyOf()
+            val service = CloudCompatService(manifestHmacKey = key)
+            key.fill(0)
+
+            val canonical = createAppleCanonicalWithService(root, "IMG_0951", service)
+            val restored = CloudCompatService(manifestHmacKey = keySnapshot).restoreForDevice(
+                canonicalDir = canonical.dir,
+                targetVendor = DeviceVendor.APPLE,
+                outputDir = File(root, "restore"),
+                preferRawReplay = false
+            )
+
+            assertEquals(ContainerMode.APPLE_PAIR, restored.mode)
+            assertTrue(restored.outputFiles.any { it.name.endsWith(".mov", ignoreCase = true) })
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun restoreForDevice_rejectsDowngradeWhenSignatureRemovedAndKeysConfigured() {
+        val root = createTempDir("cloud-signature-downgrade")
+        try {
+            val key = "livephoto-test-key".toByteArray(Charsets.UTF_8)
+            val canonical = createAppleCanonical(root, "IMG_0961", key)
+            mutateManifest(canonical.manifestFile) { props ->
+                props.remove("manifestSignatureAlgo")
+                props.remove("manifestSignatureKeyId")
+                props.remove("manifestSignature")
+            }
+            try {
+                CloudCompatService(manifestHmacKey = key).restoreForDevice(
+                    canonicalDir = canonical.dir,
+                    targetVendor = DeviceVendor.APPLE,
+                    outputDir = File(root, "restore"),
+                    preferRawReplay = false
+                )
+                fail("Expected restoreForDevice to reject manifest without required signature.")
+            } catch (expected: LivePhotoSdkException) {
+                assertEquals(LivePhotoErrorCode.INTEGRITY_CHECK_FAILED, expected.code)
+                assertTrue(expected.message?.contains("required", ignoreCase = true) == true)
+            }
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun restoreForDevice_supportsKeyRingVerificationByKeyId() {
+        val root = createTempDir("cloud-signature-keyring")
+        try {
+            val oldKey = "livephoto-old-key".toByteArray(Charsets.UTF_8)
+            val newKey = "livephoto-new-key".toByteArray(Charsets.UTF_8)
+            val signer = CloudCompatService(
+                manifestHmacKey = oldKey,
+                manifestHmacKeyId = "k-old"
+            )
+            val canonical = createAppleCanonicalWithService(root, "IMG_0971", signer)
+
+            val restored = CloudCompatService(
+                manifestHmacKeyRing = mapOf(
+                    "k-old" to oldKey,
+                    "k-new" to newKey
+                )
+            ).restoreForDevice(
+                canonicalDir = canonical.dir,
+                targetVendor = DeviceVendor.APPLE,
+                outputDir = File(root, "restore"),
+                preferRawReplay = false
+            )
+
+            assertEquals(ContainerMode.APPLE_PAIR, restored.mode)
+            assertTrue(restored.outputFiles.any { it.name.endsWith(".mov", ignoreCase = true) })
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
+    fun restoreForDevice_allowsUnsignedManifestWhenPolicyOptional() {
+        val root = createTempDir("cloud-signature-optional")
+        try {
+            val canonical = createAppleCanonical(root, "IMG_0981")
+            val restored = CloudCompatService(
+                manifestHmacKey = "livephoto-key".toByteArray(Charsets.UTF_8),
+                signaturePolicy = ManifestSignaturePolicy.OPTIONAL
+            ).restoreForDevice(
+                canonicalDir = canonical.dir,
+                targetVendor = DeviceVendor.APPLE,
+                outputDir = File(root, "restore")
+            )
+            assertTrue(restored.outputFiles.isNotEmpty())
+        } finally {
+            deleteRecursively(root)
+        }
+    }
+
+    @Test
     fun normalizeForCloud_overwritesStaleCanonicalFiles() {
         val root = createTempDir("cloud-clean-stale")
         try {
@@ -202,7 +367,11 @@ class CloudCompatServiceTest {
      * @param root 测试根目录。
      * @param contentId 内容标识。
      */
-    private fun createAppleCanonical(root: File, contentId: String): CanonicalPackage {
+    private fun createAppleCanonical(
+        root: File,
+        contentId: String,
+        manifestHmacKey: ByteArray? = null
+    ): CanonicalPackage {
         val inputDir = File(root, "input-$contentId").apply { mkdirs() }
         val image = File(inputDir, "$contentId.JPG").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
         val video = File(inputDir, "$contentId.MOV").apply { writeBytes(isoBmffVideo("qt  ")) }
@@ -213,7 +382,33 @@ class CloudCompatServiceTest {
             video = MediaSlice(video, 0L, video.length(), "video/quicktime"),
             contentId = contentId
         )
-        return CloudCompatService().normalizeForCloud(asset, File(root, "cloud-$contentId"))
+        return CloudCompatService(manifestHmacKey = manifestHmacKey)
+            .normalizeForCloud(asset, File(root, "cloud-$contentId"))
+    }
+
+    /**
+     * 使用指定服务实例创建 canonical 包。
+     *
+     * @param root 测试根目录。
+     * @param contentId 内容标识。
+     * @param service 已初始化的云端服务实例。
+     */
+    private fun createAppleCanonicalWithService(
+        root: File,
+        contentId: String,
+        service: CloudCompatService
+    ): CanonicalPackage {
+        val inputDir = File(root, "input-$contentId").apply { mkdirs() }
+        val image = File(inputDir, "$contentId.JPG").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+        val video = File(inputDir, "$contentId.MOV").apply { writeBytes(isoBmffVideo("qt  ")) }
+        val asset = LivePhotoAsset(
+            vendor = DeviceVendor.APPLE,
+            protocol = LivePhotoProtocol.APPLE_PAIR,
+            image = MediaSlice(image, 0L, image.length(), "image/jpeg"),
+            video = MediaSlice(video, 0L, video.length(), "video/quicktime"),
+            contentId = contentId
+        )
+        return service.normalizeForCloud(asset, File(root, "cloud-$contentId"))
     }
 
     /**

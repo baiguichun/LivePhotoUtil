@@ -1,12 +1,18 @@
 package com.xiaobai.livephotoutil.compat
 
-import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.CancellationException
 
-/** LivePhoto 跨厂商格式转码器。 */
-class LivePhotoTranscoder {
+/**
+ * LivePhoto 跨厂商格式转码器。
+ *
+ * @property videoNormalizer 非 ISO BMFF 输入的视频归一化扩展点。
+ */
+class LivePhotoTranscoder(
+    private val videoNormalizer: VideoCompatibilityNormalizer = DefaultVideoCompatibilityNormalizer
+) {
     /** 输出基础名清洗正则。 */
     private val safeBaseNameRegex = Regex("[^a-zA-Z0-9_-]")
 
@@ -57,7 +63,7 @@ class LivePhotoTranscoder {
         val videoOut = File(outputDir, "$baseName.mov")
         MediaIO.writeSlice(asset.image, imageOut)
         MediaIO.writeToFileAtomic(videoOut) { out ->
-            MediaIO.copySliceAsQuickTimeCompatible(asset.video, out)
+            copyVideoForContainer(asset.video, VideoContainerTarget.QUICKTIME, outputDir, out)
         }
         val assetIdentifier = buildAppleAssetIdentifier(baseName)
         val sidecar = File(outputDir, "$baseName.livephoto.properties")
@@ -95,24 +101,89 @@ class LivePhotoTranscoder {
                 message = "Target ${profile.vendor} motion photo requires JPEG image, got ${asset.image.mimeType}"
             )
         }
-        val imageBytes = MediaIO.readSlice(asset.image)
-        val cleanedImage = stripMotionMetadata(imageBytes)
         val baseName = sanitizeName(asset.contentId)
         val outFile = File(outputDir, "${baseName}_${profile.vendor.name.lowercase()}_motion.jpg")
 
-        val jpegWithPlaceholder = injectXmp(cleanedImage, buildXmp(profile, microVideoOffset = 0L))
-        val mp4Offset = jpegWithPlaceholder.size.toLong()
-        val finalJpeg = injectXmp(cleanedImage, buildXmp(profile, microVideoOffset = mp4Offset))
+        val placeholderXmp = buildXmp(profile, microVideoOffset = 0L)
+        val mp4Offset = MediaIO.estimateJpegWithoutMotionMetadataAndInjectedXmpSize(asset.image, placeholderXmp)
+        val finalXmp = buildXmp(profile, microVideoOffset = mp4Offset)
 
         MediaIO.writeToFileAtomic(outFile) { out ->
-            out.write(finalJpeg)
-            MediaIO.copySliceAsMp4Compatible(asset.video, out)
+            MediaIO.copyJpegWithoutMotionMetadataAndInjectXmp(asset.image, finalXmp, out)
+            copyVideoForContainer(asset.video, VideoContainerTarget.MP4, outputDir, out)
         }
         return ConversionResult(
             targetVendor = profile.vendor,
             mode = ContainerMode.MOTION_PHOTO_JPEG,
             outputFiles = listOf(outFile)
         )
+    }
+
+    /**
+     * 复制视频到目标容器，必要时通过 [videoNormalizer] 先归一化再继续。
+     *
+     * @param sourceVideo 输入视频切片。
+     * @param targetContainer 目标容器类型。
+     * @param outputDir 输出目录（用于创建临时工作目录）。
+     * @param out 目标输出流。
+     */
+    private fun copyVideoForContainer(
+        sourceVideo: MediaSlice,
+        targetContainer: VideoContainerTarget,
+        outputDir: File,
+        out: OutputStream
+    ) {
+        if (MediaIO.isIsoBmffSlice(sourceVideo)) {
+            copyIsoVideoForContainer(sourceVideo, targetContainer, out)
+            return
+        }
+
+        val normalizerWorkDir = File(outputDir, ".video-normalizer-${System.nanoTime()}").apply { mkdirs() }
+        try {
+            val normalized = try {
+                videoNormalizer.normalize(sourceVideo, targetContainer, normalizerWorkDir)
+            } catch (throwable: Throwable) {
+                throw LivePhotoSdkException(
+                    code = LivePhotoErrorCode.UNSUPPORTED_TRANSCODE_TARGET,
+                    message = "Video normalizer failed for $targetContainer: ${throwable.message}",
+                    cause = throwable
+                )
+            }
+
+            if (normalized == null) {
+                throw LivePhotoSdkException(
+                    code = LivePhotoErrorCode.UNSUPPORTED_TRANSCODE_TARGET,
+                    message = "Input video is not ISO BMFF and no normalizer output is available for $targetContainer."
+                )
+            }
+            if (!MediaIO.isIsoBmffSlice(normalized)) {
+                throw LivePhotoSdkException(
+                    code = LivePhotoErrorCode.UNSUPPORTED_TRANSCODE_TARGET,
+                    message = "Video normalizer output is not compatible with $targetContainer."
+                )
+            }
+            copyIsoVideoForContainer(normalized, targetContainer, out)
+        } finally {
+            deleteRecursively(normalizerWorkDir)
+        }
+    }
+
+    /**
+     * 复制 ISO BMFF 视频到目标容器。
+     *
+     * @param video 输入视频切片。
+     * @param targetContainer 目标容器类型。
+     * @param out 输出流。
+     */
+    private fun copyIsoVideoForContainer(
+        video: MediaSlice,
+        targetContainer: VideoContainerTarget,
+        out: OutputStream
+    ) {
+        when (targetContainer) {
+            VideoContainerTarget.MP4 -> MediaIO.copySliceAsMp4Compatible(video, out)
+            VideoContainerTarget.QUICKTIME -> MediaIO.copySliceAsQuickTimeCompatible(video, out)
+        }
     }
 
     /**
@@ -157,50 +228,6 @@ class LivePhotoTranscoder {
     }
 
     /**
-     * 向 JPEG 注入 APP1 XMP 段。
-     *
-     * 若 JPEG 以 EOI 结束，则插入到 EOI 前，避免破坏 JPEG 结构。
-     *
-     * @param jpegBytes 输入 JPEG 字节数组。
-     * @param xmpXml 待注入 XMP 文本。
-     */
-    private fun injectXmp(jpegBytes: ByteArray, xmpXml: String): ByteArray {
-        val header = "http://ns.adobe.com/xap/1.0/\u0000".toByteArray(StandardCharsets.US_ASCII)
-        val xmp = xmpXml.toByteArray(StandardCharsets.UTF_8)
-        val payload = ByteArray(header.size + xmp.size)
-        System.arraycopy(header, 0, payload, 0, header.size)
-        System.arraycopy(xmp, 0, payload, header.size, xmp.size)
-
-        val segmentLength = payload.size + 2
-        require(segmentLength <= 0xFFFF) { "XMP payload too large for single JPEG APP1 segment." }
-        val segment = ByteArray(payload.size + 4)
-        segment[0] = 0xFF.toByte()
-        segment[1] = 0xE1.toByte()
-        segment[2] = ((segmentLength shr 8) and 0xFF).toByte()
-        segment[3] = (segmentLength and 0xFF).toByte()
-        System.arraycopy(payload, 0, segment, 4, payload.size)
-
-        return if (jpegBytes.size >= 2
-            && jpegBytes[jpegBytes.size - 2] == 0xFF.toByte()
-            && jpegBytes[jpegBytes.size - 1] == 0xD9.toByte()
-        ) {
-            ByteArrayOutputStream().use { out ->
-                out.write(jpegBytes, 0, jpegBytes.size - 2)
-                out.write(segment)
-                out.write(0xFF)
-                out.write(0xD9)
-                out.toByteArray()
-            }
-        } else {
-            ByteArrayOutputStream().use { out ->
-                out.write(jpegBytes)
-                out.write(segment)
-                out.toByteArray()
-            }
-        }
-    }
-
-    /**
      * 归一化输出文件基础名，避免非法字符。
      *
      * @param name 原始基础名。
@@ -209,90 +236,6 @@ class LivePhotoTranscoder {
         if (name.isBlank()) return "livephoto"
         val sanitized = name.replace(safeBaseNameRegex, "")
         return if (sanitized.isBlank()) "livephoto" else sanitized
-    }
-
-    /**
-     * 移除已有 MotionPhoto 元数据段。
-     *
-     * 用于避免“旧厂商标记 + 新厂商标记”共存导致的识别串判。
-     *
-     * @param jpeg 输入 JPEG 字节数组。
-     */
-    private fun stripMotionMetadata(jpeg: ByteArray): ByteArray {
-        if (jpeg.size < 4 || jpeg[0] != 0xFF.toByte() || jpeg[1] != 0xD8.toByte()) {
-            return jpeg
-        }
-        val out = ByteArrayOutputStream()
-        out.write(0xFF)
-        out.write(0xD8)
-        var pos = 2
-        while (pos + 3 < jpeg.size) {
-            if (jpeg[pos] != 0xFF.toByte()) {
-                out.write(jpeg, pos, jpeg.size - pos)
-                break
-            }
-            var markerPos = pos + 1
-            while (markerPos < jpeg.size && jpeg[markerPos] == 0xFF.toByte()) markerPos++
-            if (markerPos >= jpeg.size) break
-            val marker = jpeg[markerPos].toInt() and 0xFF
-            if (marker == 0xD9) {
-                out.write(0xFF)
-                out.write(0xD9)
-                break
-            }
-            if (marker == 0xDA) {
-                out.write(jpeg, pos, jpeg.size - pos)
-                break
-            }
-            if (markerPos + 2 >= jpeg.size) {
-                out.write(jpeg, pos, jpeg.size - pos)
-                break
-            }
-            val len = ((jpeg[markerPos + 1].toInt() and 0xFF) shl 8) or (jpeg[markerPos + 2].toInt() and 0xFF)
-            val segmentStart = pos
-            val segmentTotal = len + 2
-            val segmentEnd = segmentStart + segmentTotal
-            if (len < 2 || segmentEnd > jpeg.size) {
-                out.write(jpeg, pos, jpeg.size - pos)
-                break
-            }
-            val drop = (marker == 0xE1 || marker == 0xFE) && containsMotionKeywords(
-                jpeg,
-                markerPos + 3,
-                len - 2
-            )
-            if (!drop) {
-                out.write(jpeg, segmentStart, segmentTotal)
-            }
-            pos = segmentEnd
-        }
-        return out.toByteArray()
-    }
-
-    /**
-     * 判断某个元数据片段中是否包含 MotionPhoto 相关关键词。
-     *
-     * @param buffer 原始字节缓冲区。
-     * @param start 片段起始位置。
-     * @param length 片段长度。
-     */
-    private fun containsMotionKeywords(buffer: ByteArray, start: Int, length: Int): Boolean {
-        if (length <= 0 || start < 0 || start + length > buffer.size) return false
-        val text = String(buffer, start, length, StandardCharsets.ISO_8859_1)
-        val keys = listOf(
-            "MotionPhoto",
-            "MicroVideo",
-            "GCamera:",
-            "HwCamera:",
-            "HUAWEI:",
-            "vivo:",
-            "VIVO:",
-            "OPPO:",
-            "Oplus:",
-            "MiCamera:",
-            "Xiaomi:"
-        )
-        return keys.any { key -> text.contains(key) }
     }
 
     /**
@@ -306,5 +249,15 @@ class LivePhotoTranscoder {
             "image/png" -> ".png"
             else -> ".jpg"
         }
+    }
+
+    /**
+     * 递归删除临时目录。
+     *
+     * @param dir 待删除目录。
+     */
+    private fun deleteRecursively(dir: File) {
+        if (!dir.exists()) return
+        dir.walkBottomUp().forEach { file -> file.delete() }
     }
 }
